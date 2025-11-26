@@ -11,4 +11,4 @@
 
 #SBATCH --gres=gpu:a40:1 # Request 1 GPU
 
-apptainer exec --nv --bind /tudelft.net/staff-bulk/ewi/insy/SPCLab/zonghuan/large_models/sam-3d-body-dinov3:/mnt/sam-3d-body-dinov3 --bind /home/nfs/zli33:/mnt/zli33 /tudelft.net/staff-bulk/ewi/insy/SPCLab/zonghuan/large_builds/containers/detectron_env.sif python /mnt/zli33/projects/sam_3d_body/demo.py --image_folder /mnt/zli33/projects/sam_3d_data/inputs --output_folder /mnt/zli33/projects/sam_3d_data/outputs --checkpoint_path /mnt/sam-3d-body-dinov3/model.ckpt --mhr_path /mnt/sam-3d-body-dinov3/assets/mhr_model.pt
+apptainer exec --nv --bind /tudelft.net/staff-bulk/ewi/insy/SPCLab/zonghuan/large_models/sam-3d-body-dinov3:/mnt/sam-3d-body-dinov3 --bind /home/nfs/zli33:/mnt/zli33 /tudelft.net/staff-bulk/ewi/insy/SPCLab/zonghuan/large_builds/containers/detectron_env.sif python /mnt/zli33/projects/sam-3d-body/demo.py --image_folder /mnt/zli33/projects/sam_3d_data/inputs --output_folder /mnt/zli33/projects/sam_3d_data/outputs --checkpoint_path /mnt/sam-3d-body-dinov3/model.ckpt --mhr_path /mnt/sam-3d-body-dinov3/assets/mhr_model.pt
