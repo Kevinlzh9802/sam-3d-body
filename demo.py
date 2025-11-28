@@ -16,7 +16,7 @@ import cv2
 import numpy as np
 import torch
 from sam_3d_body import load_sam_3d_body, SAM3DBodyEstimator
-from tools.vis_utils import visualize_sample, visualize_sample_together
+# from tools.vis_utils import visualize_sample, visualize_sample_together
 from tqdm import tqdm
 
 
@@ -90,12 +90,12 @@ def main(args):
             use_mask=args.use_mask,
         )
 
-        img = cv2.imread(image_path)
-        rend_img = visualize_sample_together(img, outputs, estimator.faces)
-        cv2.imwrite(
-            f"{output_folder}/{os.path.basename(image_path)[:-4]}.jpg",
-            rend_img.astype(np.uint8),
-        )
+        # img = cv2.imread(image_path)
+        # rend_img = visualize_sample_together(img, outputs, estimator.faces)
+        # cv2.imwrite(
+        #     f"{output_folder}/{os.path.basename(image_path)[:-4]}.jpg",
+        #     rend_img.astype(np.uint8),
+        # )
 
 
 if __name__ == "__main__":
