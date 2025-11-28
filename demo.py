@@ -4,6 +4,7 @@ import os
 from glob import glob
 
 import pyrootutils
+import pickle
 
 root = pyrootutils.setup_root(
     search_from=__file__,
@@ -89,11 +90,23 @@ def main(args):
             bbox_thr=args.bbox_thresh,
             use_mask=args.use_mask,
         )
-        print(type(outputs))
-        print(type(estimator.faces))
+        pkl_path = os.path.join(output_folder, f"{os.path.basename(image_path)}.pkl")
+        with open(pkl_path, "wb") as f:
+            pickle.dump(
+                {
+                    "image_path": image_path,
+                    "image_name": os.path.basename(image_path),
+                    "outputs": outputs,
+                    "faces": estimator.faces,
+                },
+                f,
+                protocol=pickle.HIGHEST_PROTOCOL,
+            )
+        # print(type(outputs))
+        # print(type(estimator.faces))
 
-        print(outputs)
-        print(estimator.faces)
+        # print(outputs)
+        # print(estimator.faces)
         # img = cv2.imread(image_path)
         # rend_img = visualize_sample_together(img, outputs, estimator.faces)
         # cv2.imwrite(
