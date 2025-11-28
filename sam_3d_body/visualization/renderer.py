@@ -12,6 +12,7 @@ import numpy as np
 import pyrender
 import torch
 import trimesh
+from importlib import reload
 
 
 def get_light_poses(n_lights=5, elevation=np.pi / 3, dist=12):
@@ -159,9 +160,27 @@ class Renderer:
                 "Rendering will run on CPU."
             )
             os.environ["PYOPENGL_PLATFORM"] = "osmesa"
-            return pyrender.OffscreenRenderer(
-                viewport_width=width, viewport_height=height, **kwargs
-            )
+            # Force PyOpenGL to switch platform even if it was already initialized.
+            try:
+                import OpenGL.platform as gl_platform
+                from OpenGL.platform import osmesa as gl_osmesa
+
+                reload(gl_platform)
+                gl_platform.PLATFORM = gl_osmesa.OSMesaPlatform()
+            except Exception as osmesa_setup_err:
+                raise RuntimeError(
+                    "Failed to initialize OSMesa fallback; ensure libOSMesa is installed."
+                ) from osmesa_setup_err
+
+            try:
+                return pyrender.OffscreenRenderer(
+                    viewport_width=width, viewport_height=height, **kwargs
+                )
+            except Exception as osmesa_err:
+                raise RuntimeError(
+                    "OSMesa fallback renderer creation failed. "
+                    "Check that OSMesa libraries are available."
+                ) from osmesa_err
 
     def __call__(
         self,
