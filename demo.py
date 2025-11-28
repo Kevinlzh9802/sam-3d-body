@@ -89,7 +89,11 @@ def main(args):
             bbox_thr=args.bbox_thresh,
             use_mask=args.use_mask,
         )
+        print(type(outputs))
+        print(type(estimator.faces))
 
+        print(outputs)
+        print(estimator.faces)
         # img = cv2.imread(image_path)
         # rend_img = visualize_sample_together(img, outputs, estimator.faces)
         # cv2.imwrite(
