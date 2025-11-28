@@ -4,6 +4,7 @@ import os
 
 if "PYOPENGL_PLATFORM" not in os.environ:
     os.environ["PYOPENGL_PLATFORM"] = "egl"
+import warnings
 from typing import List, Optional
 
 import cv2
@@ -144,6 +145,24 @@ class Renderer:
         self.focal_length = focal_length
         self.faces = faces
 
+    def _make_offscreen_renderer(self, width, height, **kwargs):
+        """
+        Try EGL first; fall back to OSMesa (software) if EGL devices are unavailable.
+        """
+        try:
+            return pyrender.OffscreenRenderer(
+                viewport_width=width, viewport_height=height, **kwargs
+            )
+        except Exception as egl_err:
+            warnings.warn(
+                f"EGL rendering failed ({egl_err}); falling back to OSMesa. "
+                "Rendering will run on CPU."
+            )
+            os.environ["PYOPENGL_PLATFORM"] = "osmesa"
+            return pyrender.OffscreenRenderer(
+                viewport_width=width, viewport_height=height, **kwargs
+            )
+
     def __call__(
         self,
         vertices: np.array,
@@ -175,10 +194,7 @@ class Renderer:
         image = image / 255.0
         h, w = image.shape[:2]
 
-        renderer = pyrender.OffscreenRenderer(
-            viewport_height=h,
-            viewport_width=w,
-        )
+        renderer = self._make_offscreen_renderer(width=w, height=h)
 
         camera_translation = cam_t.copy()
         camera_translation[0] *= -1.0
@@ -299,8 +315,8 @@ class Renderer:
         render_res=[256, 256],
     ):
 
-        renderer = pyrender.OffscreenRenderer(
-            viewport_width=render_res[0], viewport_height=render_res[1], point_size=1.0
+        renderer = self._make_offscreen_renderer(
+            width=render_res[0], height=render_res[1], point_size=1.0
         )
         # material = pyrender.MetallicRoughnessMaterial(
         #     metallicFactor=0.0,
@@ -365,8 +381,8 @@ class Renderer:
         focal_length=None,
     ):
 
-        renderer = pyrender.OffscreenRenderer(
-            viewport_width=render_res[0], viewport_height=render_res[1], point_size=1.0
+        renderer = self._make_offscreen_renderer(
+            width=render_res[0], height=render_res[1], point_size=1.0
         )
         MESH_COLORS = [
             [0.000, 0.447, 0.741],
