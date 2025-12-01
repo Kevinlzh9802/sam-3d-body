@@ -36,7 +36,8 @@ def main(args):
     fov_path = args.fov_path or os.environ.get("SAM3D_FOV_PATH", "")
 
     # Initialize sam-3d-body model and other optional modules
-    device = torch.device("cuda") if torch.cuda.is_available() else torch.device("cpu")
+    # device = torch.device("cuda") if torch.cuda.is_available() else torch.device("cpu")
+    device = torch.device("cpu")
     model, model_cfg = load_sam_3d_body(
         args.checkpoint_path, device=device, mhr_path=mhr_path
     )
@@ -85,6 +86,36 @@ def main(args):
     )
 
     for image_path in tqdm(images_list):
+        keypoint_prompt = None
+        if len(args.keypoint_json_folder):
+            import json
+
+            json_path = os.path.join(
+                args.keypoint_json_folder,
+                f"{os.path.splitext(os.path.basename(image_path))[0]}.json",
+            )
+            if os.path.exists(json_path):
+                with open(json_path, "r") as f:
+                    data = json.load(f)
+                # Accept either {"keypoints": [...]} or a raw list.
+                if isinstance(data, dict) and "keypoints" in data:
+                    data = data["keypoints"]
+                keypoint_prompt = np.array(data, dtype=np.float32)
+                if keypoint_prompt.ndim == 2:
+                    # Assume single person; add person dimension.
+                    keypoint_prompt = keypoint_prompt[None, ...]
+                # If labels are missing (only x, y), auto-assign sequential labels.
+                if keypoint_prompt.shape[-1] == 2:
+                    labels = np.arange(keypoint_prompt.shape[1], dtype=np.float32)[
+                        None, :, None
+                    ]
+                    labels = np.repeat(labels, keypoint_prompt.shape[0], axis=0)
+                    keypoint_prompt = np.concatenate(
+                        [keypoint_prompt, labels], axis=-1
+                    )
+            else:
+                print(f"[WARN] Keypoint JSON not found for {image_path}, skipping prompts.")
+
         outputs = estimator.process_one_image(
             image_path,
             bbox_thr=args.bbox_thresh,
@@ -201,6 +232,12 @@ if __name__ == "__main__":
         action="store_true",
         default=False,
         help="Use mask-conditioned prediction (segmentation mask is automatically generated from bbox)",
+    )
+    parser.add_argument(
+        "--keypoint_json_folder",
+        default="",
+        type=str,
+        help="Optional folder containing per-image keypoint prompts as JSON (image.jpg -> image.json).",
     )
     args = parser.parse_args()
 
