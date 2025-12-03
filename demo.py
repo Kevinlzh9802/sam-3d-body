@@ -120,6 +120,8 @@ def main(args):
             image_path,
             bbox_thr=args.bbox_thresh,
             use_mask=args.use_mask,
+            inference_type="body",              # since we now manually prompt
+            keypoint_prompt=keypoint_prompt,    # <--- NEW
         )
         pkl_path = os.path.join(output_folder, f"{os.path.basename(image_path)}.pkl")
         with open(pkl_path, "wb") as f:

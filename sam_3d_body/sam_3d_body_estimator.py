@@ -72,6 +72,7 @@ class SAM3DBodyEstimator:
         nms_thr: float = 0.3,
         use_mask: bool = False,
         inference_type: str = "full",
+        keypoint_prompt: Optional[np.ndarray] = None,   # <--- NEW
     ):
         """
         Perform model prediction in top-down format: assuming input is a full image.
@@ -87,6 +88,7 @@ class SAM3DBodyEstimator:
                 - full: full-body inference with both body and hand decoders
                 - body: inference with body decoder only (still full-body output)
                 - hand: inference with hand decoder only (only hand output)
+            keypoint_prompt: Optional pre-computed keypoint prompts (numpy array).
         """
 
         # clear all cached results
@@ -159,6 +161,36 @@ class SAM3DBodyEstimator:
         #################### Run model inference on an image ####################
         batch = recursive_to(batch, "cuda")
         self.model._initialize_batch(batch)
+        
+        ##################### Handle keypoint prompts #####################
+        external_kps = None
+        if keypoint_prompt is not None:
+            # keypoint_prompt: (num_person, num_kps, 2 or 3) in *full-image pixel coords*
+            kps = torch.from_numpy(keypoint_prompt).to(batch["img"])
+
+            if kps.ndim == 2:
+                kps = kps[None, ...]  # (1, num_kps, D)
+
+            # If no labels, assign 0..num_kps-1
+            if kps.shape[-1] == 2:
+                num_person, num_kps, _ = kps.shape
+                labels = torch.arange(num_kps, device=kps.device, dtype=kps.dtype)[
+                    None, :, None
+                ].expand(num_person, num_kps, 1)
+                kps = torch.cat([kps, labels], dim=-1)  # (P, K, 3)
+
+            coords = kps[..., :2]          # pixel coords in full image
+            labels = kps[..., 2:]          # (P, K, 1)
+
+            # Convert to crop coordinates in [-0.5, 0.5]
+            coords_crop = self.model._full_to_crop(batch, coords)  # (P, K, 2) in [-0.5,0.5]
+
+            # Normalize to [0, 1] as expected by the prompt encoder
+            coords_norm = torch.clamp(coords_crop + 0.5, 0.0, 1.0)
+
+            external_kps = torch.cat([coords_norm, labels], dim=-1)  # (P, K, 3)
+            # Flatten person dim to match model convention: B * num_person
+            external_kps = external_kps.reshape(-1, external_kps.shape[1], 3)
 
         # Handle camera intrinsics
         # - either provided externally or generated via default FOV estimator
@@ -176,17 +208,34 @@ class SAM3DBodyEstimator:
         else:
             cam_int = batch["cam_int"].clone()
 
-        outputs = self.model.run_inference(
-            img,
-            batch,
-            inference_type=inference_type,
-            transform_hand=self.transform_hand,
-            thresh_wrist_angle=self.thresh_wrist_angle,
-        )
-        if inference_type == "full":
-            pose_output, batch_lhand, batch_rhand, _, _ = outputs
+        if external_kps is None:
+            # Original behaviour
+            outputs = self.model.run_inference(
+                img,
+                batch,
+                inference_type=inference_type,
+                transform_hand=self.transform_hand,
+                thresh_wrist_angle=self.thresh_wrist_angle,
+            )
+            if inference_type == "full":
+                pose_output, batch_lhand, batch_rhand, _, _ = outputs
+            else:
+                pose_output = outputs
         else:
-            pose_output = outputs
+            # 1) run body-only inference
+            pose_output = self.model.run_inference(
+                img,
+                batch,
+                inference_type="body",
+                transform_hand=self.transform_hand,
+                thresh_wrist_angle=self.thresh_wrist_angle,
+            )
+            # 2) refine with your keypoint prompts
+            pose_output, _ = self.model.run_keypoint_prompt(
+                batch,
+                pose_output,
+                external_kps,
+            )
 
         out = pose_output["mhr"]
         out = recursive_to(out, "cpu")
