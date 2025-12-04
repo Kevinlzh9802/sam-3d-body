@@ -1,7 +1,7 @@
 # Copyright (c) Meta Platforms, Inc. and affiliates.
 import argparse
 import os
-from glob import glob
+from collections import defaultdict
 
 import pyrootutils
 import pickle
@@ -85,43 +85,51 @@ def main(args):
                 rel_path = os.path.relpath(image_path, args.image_folder)
                 images_list.append((image_path, rel_path))
     images_list = sorted(images_list, key=lambda x: x[1])
+    images_by_folder = defaultdict(list)
+    for image_path, rel_path in images_list:
+        folder_name = rel_path.split(os.sep)[0]
+        images_by_folder[folder_name].append((image_path, rel_path))
 
-    for image_path, rel_path in tqdm(images_list):
-        keypoint_prompt = None
-        bboxes, kps = None, None
-        if len(args.keypoint_json_folder):
-            keypoint_candidates = [
-                os.path.join(args.keypoint_json_folder, f"{rel_path}.pkl"),
-                os.path.join(args.keypoint_json_folder, f"{os.path.basename(image_path)}.pkl"),
-            ]
-            for keypoint_path in keypoint_candidates:
-                if os.path.exists(keypoint_path):
-                    bboxes, kps = pickle.load(open(keypoint_path, "rb"))
-                    break
+    with tqdm(total=len(images_list)) as pbar:
+        for folder_name in sorted(images_by_folder.keys()):
+            folder_images = sorted(images_by_folder[folder_name], key=lambda x: x[1])
+            bboxes_kps_data = None
+            if len(args.keypoint_json_folder):
+                keypoint_path = os.path.join(args.keypoint_json_folder, f"{folder_name}.pkl")
+                with open(keypoint_path, "rb") as kp_f:
+                    bboxes_kps_data = pickle.load(kp_f)
+            for idx, (image_path, rel_path) in enumerate(folder_images):
+                #TODO: idx may not be the same as image order. Deal with this.
+                if bboxes_kps_data is not None:
+                    bboxes = bboxes_kps_data[idx]["bboxes"]
+                    kps = bboxes_kps_data[idx]["kps"]
+                else:
+                    bboxes, kps = None, None
 
-        outputs = estimator.process_one_image(
-            image_path,
-            bboxes=bboxes,
-            bbox_thr=args.bbox_thresh,
-            use_mask=args.use_mask,
-            inference_type="body",              # since we now manually prompt
-            keypoint_prompt=keypoint_prompt,    # <--- NEW
-        )
-        pkl_path = os.path.join(output_folder, f"{rel_path}.pkl")
-        pkl_dir = os.path.dirname(pkl_path)
-        if pkl_dir:
-            os.makedirs(pkl_dir, exist_ok=True)
-        with open(pkl_path, "wb") as f:
-            pickle.dump(
-                {
-                    "image_path": image_path,
-                    "image_name": os.path.basename(image_path),
-                    "outputs": outputs,
-                    "faces": estimator.faces,
-                },
-                f,
-                protocol=pickle.HIGHEST_PROTOCOL,
-            )
+                outputs = estimator.process_one_image(
+                    image_path,
+                    bboxes=bboxes,
+                    bbox_thr=args.bbox_thresh,
+                    use_mask=args.use_mask,
+                    inference_type="body",              # since we now manually prompt
+                    keypoint_prompt=kps,    # <--- NEW
+                )
+                pkl_path = os.path.join(output_folder, f"{rel_path}.pkl")
+                pkl_dir = os.path.dirname(pkl_path)
+                if pkl_dir:
+                    os.makedirs(pkl_dir, exist_ok=True)
+                with open(pkl_path, "wb") as f:
+                    pickle.dump(
+                        {
+                            "image_path": image_path,
+                            "image_name": os.path.basename(image_path),
+                            "outputs": outputs,
+                            "faces": estimator.faces,
+                        },
+                        f,
+                        protocol=pickle.HIGHEST_PROTOCOL,
+                    )
+                pbar.update(1)
         # print(type(outputs))
         # print(type(estimator.faces))
 
