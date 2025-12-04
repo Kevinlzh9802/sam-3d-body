@@ -69,26 +69,35 @@ def main(args):
     )
 
     image_extensions = [
-        "*.jpg",
-        "*.jpeg",
-        "*.png",
-        "*.gif",
-        "*.bmp",
-        "*.tiff",
-        "*.webp",
+        ".jpg",
+        ".jpeg",
+        ".png",
+        ".gif",
+        ".bmp",
+        ".tiff",
+        ".webp",
     ]
-    images_list = sorted(
-        [
-            image
-            for ext in image_extensions
-            for image in glob(os.path.join(args.image_folder, ext))
-        ]
-    )
+    images_list = []
+    for root, _, files in os.walk(args.image_folder):
+        for file_name in files:
+            if os.path.splitext(file_name)[1].lower() in image_extensions:
+                image_path = os.path.join(root, file_name)
+                rel_path = os.path.relpath(image_path, args.image_folder)
+                images_list.append((image_path, rel_path))
+    images_list = sorted(images_list, key=lambda x: x[1])
 
-    for image_path in tqdm(images_list):
+    for image_path, rel_path in tqdm(images_list):
         keypoint_prompt = None
+        bboxes, kps = None, None
         if len(args.keypoint_json_folder):
-            bboxes, kps = pickle.load(open(os.path.join(args.keypoint_json_folder, f"{os.path.basename(image_path)}.pkl"), "rb"))
+            keypoint_candidates = [
+                os.path.join(args.keypoint_json_folder, f"{rel_path}.pkl"),
+                os.path.join(args.keypoint_json_folder, f"{os.path.basename(image_path)}.pkl"),
+            ]
+            for keypoint_path in keypoint_candidates:
+                if os.path.exists(keypoint_path):
+                    bboxes, kps = pickle.load(open(keypoint_path, "rb"))
+                    break
 
         outputs = estimator.process_one_image(
             image_path,
@@ -98,7 +107,10 @@ def main(args):
             inference_type="body",              # since we now manually prompt
             keypoint_prompt=keypoint_prompt,    # <--- NEW
         )
-        pkl_path = os.path.join(output_folder, f"{os.path.basename(image_path)}.pkl")
+        pkl_path = os.path.join(output_folder, f"{rel_path}.pkl")
+        pkl_dir = os.path.dirname(pkl_path)
+        if pkl_dir:
+            os.makedirs(pkl_dir, exist_ok=True)
         with open(pkl_path, "wb") as f:
             pickle.dump(
                 {
