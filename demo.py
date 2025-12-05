@@ -93,7 +93,7 @@ def main(args):
             folder_images = sorted(images_by_folder[folder_name], key=lambda x: x[1])
             bboxes_kps_data = None
             if len(args.bbox_kp_folder):
-                keypoint_path = os.path.join(args.keypoint_json_folder, f"{folder_name}.pkl")
+                keypoint_path = os.path.join(args.bbox_kp_folder, f"{folder_name}.pkl")
                 with open(keypoint_path, "rb") as kp_f:
                     bboxes_kps_data = pickle.load(kp_f)
             for idx, (image_path, rel_path) in enumerate(folder_images):
