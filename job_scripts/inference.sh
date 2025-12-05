@@ -17,9 +17,10 @@ bind_local_path=/mnt/zli33
 sif_path=$bulk_path/large_builds/containers/detectron_env.sif
 
 sam_3d_body_path=$bind_local_path/projects/sam-3d-body
-input_folder=$bind_bulk_path/datasets/sam_3d_body/inputs/image_raw
-output_folder=$bind_bulk_path/datasets/sam_3d_body/outputs/image_raw
+input_folder=$bind_bulk_path/datasets/sam_3d_body/images_raw
+output_folder=$bind_bulk_path/datasets/sam_3d_body/outputs/images_with_kp
+kp_folder=$bind_bulk_path/datasets/sam_3d_body/bbox_kp_raw
 checkpoint_path=$bind_bulk_path/large_models/sam-3d-body-dinov3/model.ckpt
 mhr_path=$bind_bulk_path/large_models/sam-3d-body-dinov3/assets/mhr_model.pt
 
-apptainer exec --nv --bind $bulk_path:$bind_bulk_path --bind $local_path:$bind_local_path $sif_path python $sam_3d_body_path/demo.py --image_folder $input_folder --output_folder $output_folder --checkpoint_path $checkpoint_path --mhr_path $mhr_path
+apptainer exec --nv --bind $bulk_path:$bind_bulk_path --bind $local_path:$bind_local_path $sif_path python $sam_3d_body_path/demo.py --image_folder $input_folder --output_folder $output_folder --checkpoint_path $checkpoint_path --mhr_path $mhr_path --bbox_kp_folder $kp_folder

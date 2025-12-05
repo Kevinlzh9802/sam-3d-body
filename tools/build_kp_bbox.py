@@ -26,6 +26,19 @@ JOINT_NAMES = [
 # If you later find the exact MHR-70 index mapping, you can plug that in here.
 JOINT_LABELS = {name: idx for idx, name in enumerate(JOINT_NAMES)}
 
+MHR70_MAP = {
+    0: 69,   # head → neck
+    1: 0,    # nose
+    2: 5,    # left shoulder
+    3: 6,    # right shoulder
+    4: 9,    # left hip
+    5: 10,   # right hip
+    6: 13,   # left ankle
+    7: 14,   # right ankle
+    8: 15,   # left big toe tip
+    9: 18,   # right big toe tip
+}
+
 def extract_raw_keypoints(skeleton: Dict[str, Any]) -> Optional[np.ndarray]:
     keypoint_names = [
         ("head", 0), ("nose", 2),
@@ -188,9 +201,9 @@ def build_bboxex_kps_single(
         # Build keypoint [x_px, y_px, label] array
         labels = np.full((10,), -2.0, dtype=np.float32)  # -2 = invalid
         # Assign labels 0..9 ONLY to valid joints
-        for j, name in enumerate(JOINT_NAMES):
+        for j, name in enumerate(MHR70_MAP.keys()):
             if valid_mask[j]:
-                labels[j] = float(JOINT_LABELS[name])
+                labels[j] = float(MHR70_MAP[name])
 
         kps_with_labels = np.concatenate(
             [xy_pix.astype(np.float32), labels[:, None]], axis=-1

@@ -13,7 +13,6 @@ root = pyrootutils.setup_root(
     dotenv=True,
 )
 
-import cv2
 import numpy as np
 import torch
 from sam_3d_body import load_sam_3d_body, SAM3DBodyEstimator
@@ -36,8 +35,7 @@ def main(args):
     fov_path = args.fov_path or os.environ.get("SAM3D_FOV_PATH", "")
 
     # Initialize sam-3d-body model and other optional modules
-    # device = torch.device("cuda") if torch.cuda.is_available() else torch.device("cpu")
-    device = torch.device("cpu")
+    device = torch.device("cuda") if torch.cuda.is_available() else torch.device("cpu")
     model, model_cfg = load_sam_3d_body(
         args.checkpoint_path, device=device, mhr_path=mhr_path
     )
@@ -94,7 +92,7 @@ def main(args):
         for folder_name in sorted(images_by_folder.keys()):
             folder_images = sorted(images_by_folder[folder_name], key=lambda x: x[1])
             bboxes_kps_data = None
-            if len(args.keypoint_json_folder):
+            if len(args.bbox_kp_folder):
                 keypoint_path = os.path.join(args.keypoint_json_folder, f"{folder_name}.pkl")
                 with open(keypoint_path, "rb") as kp_f:
                     bboxes_kps_data = pickle.load(kp_f)
@@ -231,10 +229,10 @@ if __name__ == "__main__":
         help="Use mask-conditioned prediction (segmentation mask is automatically generated from bbox)",
     )
     parser.add_argument(
-        "--keypoint_json_folder",
+        "--bbox_kp_folder",
         default="",
         type=str,
-        help="Optional folder containing per-image keypoint prompts as JSON (image.jpg -> image.json).",
+        help="Optional folder containing per-image bboxes and keypoints as pickle (image.jpg -> image.pkl).",
     )
     args = parser.parse_args()
 
