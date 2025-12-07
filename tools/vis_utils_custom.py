@@ -1,6 +1,7 @@
 import cv2
 import numpy as np
 import pickle
+import torch
 
 def kp_check(filename, kps):
     assert isinstance(kps, np.ndarray), "Invalid keypoints type"
@@ -26,7 +27,7 @@ def plot_bboxes_kps(img, bboxes, kps):
 
 def main():
     # check pickle file
-    pickle_file = "experiments/bboxex_kps/400000.pkl"
+    pickle_file = "experiments/bboxex_kps/428.pkl"
     with open(pickle_file, "rb") as f:
         data = pickle.load(f)
     print(data)

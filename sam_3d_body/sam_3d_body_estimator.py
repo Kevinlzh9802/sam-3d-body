@@ -222,6 +222,8 @@ class SAM3DBodyEstimator:
             else:
                 pose_output = outputs
         else:
+            print(f"External keypoints shape: {external_kps.shape}")
+            print(f"External keypoints: {external_kps[0, ..., :2]}")
             # 1) run body-only inference
             pose_output = self.model.run_inference(
                 img,
