@@ -117,6 +117,8 @@ class PromptEncoder(nn.Module):
         Output shape [B, N, C], mask shape [B, N]
         """
         assert points.min() >= 0 and points.max() <= 1
+        print(f"Points: {points} with shape {points.shape}")
+        print(f"Labels: {labels} with shape {labels.shape}")
         point_embedding = self.pe_layer._pe_encoding(points.to(torch.float))
         point_embedding[labels == -2] = 0.0  # invalid points
         point_embedding[labels == -2] += self.invalid_point_embed.weight
