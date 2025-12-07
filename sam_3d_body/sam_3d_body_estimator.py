@@ -157,7 +157,8 @@ class SAM3DBodyEstimator:
 
         #################### Construct batch data samples ####################
         batch = prepare_batch(img, self.transform, boxes, masks, masks_score)
-        print("img_size: ", batch["img_size"])
+        print(img.shape)
+        print(batch["img_size"])
         #################### Run model inference on an image ####################
         batch = recursive_to(batch, "cuda")
         self.model._initialize_batch(batch)

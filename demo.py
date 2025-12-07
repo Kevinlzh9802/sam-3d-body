@@ -114,7 +114,7 @@ def main(args):
                     print(f"Warning: No bboxes and kps found for {rel_path_no_ext}")
                     bboxes, kps = None, None
 
-                print(f"Processing {rel_path_no_ext} with bboxes: {bboxes} and kps: {kps}")
+                # print(f"Processing {rel_path_no_ext} with bboxes: {bboxes} and kps: {kps}")
                 # plot bboxes and kps
                 # img = cv2.imread(image_path)
                 # img_with_bboxes_kps = plot_bboxes_kps(img, bboxes, kps)

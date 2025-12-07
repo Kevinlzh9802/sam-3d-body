@@ -181,6 +181,13 @@ class PromptEncoder(nn.Module):
         if keypoints is not None:
             coords = keypoints[:, :, :2]
             labels = keypoints[:, :, -1]
+            print("Coords: ", coords[0, ...])
+            print("Labels: ", labels[0, ...])
+            print("Coords shape: ", coords.shape)
+            print("Labels shape: ", labels.shape)
+            print("Coords max: ", coords.max())
+            print("Coords min: ", coords.min())
+
             point_embeddings, point_mask = self._embed_keypoints(
                 coords, labels
             )  # pad=(boxes is None))
