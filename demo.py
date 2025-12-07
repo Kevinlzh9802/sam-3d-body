@@ -18,6 +18,8 @@ import torch
 from sam_3d_body import load_sam_3d_body, SAM3DBodyEstimator
 # from tools.vis_utils import visualize_sample, visualize_sample_together
 from tqdm import tqdm
+from tools.vis_utils_custom import plot_bboxes_kps, kp_check
+import cv2
 
 
 def main(args):
@@ -97,12 +99,19 @@ def main(args):
                 with open(keypoint_path, "rb") as kp_f:
                     bboxes_kps_data = pickle.load(kp_f)
             for idx, (image_path, rel_path) in enumerate(folder_images):
-                #TODO: idx may not be the same as image order. Deal with this.
+                rel_path_no_ext = os.path.splitext(rel_path)[0]
+                
                 if bboxes_kps_data is not None:
                     bboxes = bboxes_kps_data[idx]["bboxes"]
                     kps = bboxes_kps_data[idx]["kps"]
                 else:
                     bboxes, kps = None, None
+
+                kps = kp_check(rel_path_no_ext, kps)
+                # plot bboxes and kps
+                img = cv2.imread(image_path)
+                img_with_bboxes_kps = plot_bboxes_kps(img, bboxes, kps)
+                cv2.imwrite(os.path.join(output_folder, f"{rel_path_no_ext}_bbox_kps.jpg"), img_with_bboxes_kps)
 
                 outputs = estimator.process_one_image(
                     image_path,
@@ -112,7 +121,7 @@ def main(args):
                     inference_type="body",              # since we now manually prompt
                     keypoint_prompt=kps,    # <--- NEW
                 )
-                pkl_path = os.path.join(output_folder, f"{rel_path}.pkl")
+                pkl_path = os.path.join(output_folder, f"{rel_path_no_ext}.pkl")
                 pkl_dir = os.path.dirname(pkl_path)
                 if pkl_dir:
                     os.makedirs(pkl_dir, exist_ok=True)
