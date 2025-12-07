@@ -3,7 +3,7 @@ import numpy as np
 
 def kp_check(filename, kps):
     assert isinstance(kps, np.ndarray), "Invalid keypoints type"
-    assert kps.shape[0] == 10, "Invalid keypoints shape"
+    assert kps.shape[1] == 10, "Invalid keypoints shape"
 
     if np.any(kps < 0):
         print(f"Warning: Keypoints < 0 found in {filename}")
