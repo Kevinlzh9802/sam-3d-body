@@ -109,7 +109,7 @@ def main(args):
                 try:
                     bboxes = bboxes_kps_data[idx]["bboxes"]
                     kps = bboxes_kps_data[idx]["kps"]
-                    kps = kp_check(rel_path_no_ext, kps)
+                    # kps = kp_check(rel_path_no_ext, kps)
                 except:
                     print(f"Warning: No bboxes and kps found for {rel_path_no_ext}")
                     bboxes, kps = None, None
