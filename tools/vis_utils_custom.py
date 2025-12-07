@@ -1,5 +1,6 @@
 import cv2
 import numpy as np
+import pickle
 
 def kp_check(filename, kps):
     assert isinstance(kps, np.ndarray), "Invalid keypoints type"
@@ -22,3 +23,13 @@ def plot_bboxes_kps(img, bboxes, kps):
         for kp in kps:
             cv2.circle(img_with_bboxes_kps, (int(kp[0]), int(kp[1])), 5, (0, 255, 0), -1)
     return img_with_bboxes_kps
+
+def main():
+    # check pickle file
+    pickle_file = "experiments/bboxex_kps/400000.pkl"
+    with open(pickle_file, "rb") as f:
+        data = pickle.load(f)
+    print(data)
+
+if __name__ == "__main__":
+    main()
