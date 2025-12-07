@@ -5,8 +5,8 @@ import numpy as np
 import pickle
 
 RAW_JSON_PATH = Path("./experiments/coco/")
-IMG_WIDTH = 1920
-IMG_HEIGHT = 1080
+IMG_WIDTH = 960
+IMG_HEIGHT = 540
 
 # The 10 joints you mentioned, just for reference / debugging
 JOINT_NAMES = [
@@ -204,10 +204,13 @@ def build_bboxex_kps_single(
         for j, name in enumerate(MHR70_MAP.keys()):
             if valid_mask[j]:
                 labels[j] = float(MHR70_MAP[name])
-
+        # Assign (0, 0) to invalid joints
+        invalid_mask = (labels == -2)
+        xy_pix[invalid_mask] = (0, 0)
         kps_with_labels = np.concatenate(
             [xy_pix.astype(np.float32), labels[:, None]], axis=-1
         )  # (10, 3)
+        assert not np.any(np.isnan(kps_with_labels))
 
         all_bboxes.append(bbox)
         all_keypoints.append(kps_with_labels)

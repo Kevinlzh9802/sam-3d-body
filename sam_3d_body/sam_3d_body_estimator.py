@@ -157,8 +157,8 @@ class SAM3DBodyEstimator:
 
         #################### Construct batch data samples ####################
         batch = prepare_batch(img, self.transform, boxes, masks, masks_score)
-        print(img.shape)
-        print(batch["img_size"])
+        # print(img.shape)
+        # print(batch["img_size"])
         #################### Run model inference on an image ####################
         batch = recursive_to(batch, "cuda")
         self.model._initialize_batch(batch)
@@ -184,14 +184,14 @@ class SAM3DBodyEstimator:
             labels = kps[..., 2:]          # (P, K, 1)
 
             # Convert to crop coordinates in [-0.5, 0.5]
-            print("Before crop: ", coords[0, ...])
+            # print("Before crop: ", coords[0, ...])
             coords_crop = self.model._full_to_crop(batch, coords)  # (P, K, 2) in [-0.5,0.5]
 
             # Normalize to [0, 1] as expected by the prompt encoder
-            print("Before clamp: ", coords_crop[0, ...])
+            # print("Before clamp: ", coords_crop[0, ...])
             
             coords_norm = torch.clamp(coords_crop + 0.5, 0.0, 1.0)
-            print("After clamp: ", coords_norm[0, ...])
+            # print("After clamp: ", coords_norm[0, ...])
 
             external_kps = torch.cat([coords_norm, labels], dim=-1)  # (P, K, 3)
             # Flatten person dim to match model convention: B * num_person

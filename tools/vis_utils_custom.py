@@ -7,12 +7,10 @@ def kp_check(filename, kps):
     assert isinstance(kps, np.ndarray), "Invalid keypoints type"
     assert kps.shape[1] == 10, "Invalid keypoints shape"
 
-    if np.any(kps < 0):
-        print(f"Warning: Keypoints < 0 found in {filename}")
-    if np.any(kps > 1):
-        print(f"Warning: Keypoints > 1 found in {filename}")
-    kps[kps < 0] = 0
-    kps[kps > 1] = 1
+    labels = kps[..., -1]
+    invalid_mask = (labels == -2)
+    kps[invalid_mask] = 0
+    kps[invalid_mask] = 1
     return kps
 
 def plot_bboxes_kps(img, bboxes, kps):

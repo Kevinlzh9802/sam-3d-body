@@ -1666,7 +1666,7 @@ class SAM3DBody(BaseModel):
                 [prev_estimate, pose_output["pred_cam"].detach().unsqueeze(1)],
                 dim=-1,
             )
-        print("Keypoint prompt: ", keypoint_prompt[0, ...])
+        # print("Keypoint prompt: ", keypoint_prompt[0, ...])
         tokens_output, pose_output = self.forward_decoder(
             image_embeddings,
             init_estimate=None,  # not recurring previous estimate
