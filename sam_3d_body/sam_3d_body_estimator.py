@@ -238,6 +238,7 @@ class SAM3DBodyEstimator:
                 thresh_wrist_angle=self.thresh_wrist_angle,
             )
             # 2) refine with your keypoint prompts
+            print("External keypoints: ", external_kps[0, ...])
             pose_output, _ = self.model.run_keypoint_prompt(
                 batch,
                 pose_output,
