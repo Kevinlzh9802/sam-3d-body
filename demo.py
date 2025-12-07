@@ -100,14 +100,15 @@ def main(args):
                     bboxes_kps_data = pickle.load(kp_f)
             for idx, (image_path, rel_path) in enumerate(folder_images):
                 rel_path_no_ext = os.path.splitext(rel_path)[0]
-                
-                if bboxes_kps_data is not None:
+
+                try:
                     bboxes = bboxes_kps_data[idx]["bboxes"]
                     kps = bboxes_kps_data[idx]["kps"]
-                else:
+                    kps = kp_check(rel_path_no_ext, kps)
+                except:
+                    print(f"Warning: No bboxes and kps found for {rel_path_no_ext}")
                     bboxes, kps = None, None
 
-                kps = kp_check(rel_path_no_ext, kps)
                 # plot bboxes and kps
                 img = cv2.imread(image_path)
                 img_with_bboxes_kps = plot_bboxes_kps(img, bboxes, kps)
