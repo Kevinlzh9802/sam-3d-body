@@ -186,7 +186,10 @@ class SAM3DBodyEstimator:
             coords_crop = self.model._full_to_crop(batch, coords)  # (P, K, 2) in [-0.5,0.5]
 
             # Normalize to [0, 1] as expected by the prompt encoder
+            print("Before clamp: ", coords_crop[0, ...])
+            print(batch["img_size"])
             coords_norm = torch.clamp(coords_crop + 0.5, 0.0, 1.0)
+            print("After clamp: ", coords_norm[0, ...])
 
             external_kps = torch.cat([coords_norm, labels], dim=-1)  # (P, K, 3)
             # Flatten person dim to match model convention: B * num_person
@@ -222,8 +225,8 @@ class SAM3DBodyEstimator:
             else:
                 pose_output = outputs
         else:
-            print(f"External keypoints shape: {external_kps.shape}")
-            print(f"External keypoints: {external_kps[0, ..., :2]}")
+            # print(f"External keypoints shape: {external_kps.shape}")
+            # print(f"External keypoints: {external_kps[0, ..., :2]}")
             # 1) run body-only inference
             pose_output = self.model.run_inference(
                 img,
