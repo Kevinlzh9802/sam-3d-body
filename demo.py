@@ -92,6 +92,11 @@ def main(args):
 
     with tqdm(total=len(images_list)) as pbar:
         for folder_name in sorted(images_by_folder.keys()):
+
+            folder_code = int(folder_name)
+            if folder_code < args.segs_interval[0] or folder_code > args.segs_interval[1]:
+                continue
+            
             folder_images = sorted(images_by_folder[folder_name], key=lambda x: x[1])
             bboxes_kps_data = None
             if len(args.bbox_kp_folder):
@@ -110,9 +115,9 @@ def main(args):
                     bboxes, kps = None, None
 
                 # plot bboxes and kps
-                img = cv2.imread(image_path)
-                img_with_bboxes_kps = plot_bboxes_kps(img, bboxes, kps)
-                cv2.imwrite(os.path.join(output_folder, f"{rel_path_no_ext}_bbox_kps.jpg"), img_with_bboxes_kps)
+                # img = cv2.imread(image_path)
+                # img_with_bboxes_kps = plot_bboxes_kps(img, bboxes, kps)
+                # cv2.imwrite(os.path.join(output_folder, f"{rel_path_no_ext}_bbox_kps.jpg"), img_with_bboxes_kps)
 
                 outputs = estimator.process_one_image(
                     image_path,
@@ -243,6 +248,12 @@ if __name__ == "__main__":
         default="",
         type=str,
         help="Optional folder containing per-image bboxes and keypoints as pickle (image.jpg -> image.pkl).",
+    )
+    parser.add_argument(
+        "--segs_interval",
+        default=[400, 500],
+        type=list,
+        help="Optional list of segments to process, default is [400, 500].",
     )
     args = parser.parse_args()
 
