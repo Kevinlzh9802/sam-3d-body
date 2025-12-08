@@ -2,6 +2,7 @@ import cv2
 import numpy as np
 import pickle
 import torch
+import os
 
 def kp_check(filename, kps):
     assert isinstance(kps, np.ndarray), "Invalid keypoints type"
@@ -15,13 +16,33 @@ def kp_check(filename, kps):
 
 def plot_bboxes_kps(img, bboxes, kps):
     img_with_bboxes_kps = img.copy()
-    if bboxes is not None:
-        for bbox in bboxes:
-            cv2.rectangle(img_with_bboxes_kps, (int(bbox[0]), int(bbox[1])), (int(bbox[2]), int(bbox[3])), (0, 0, 255), 2)
-    if kps is not None:
-        for kp in kps:
-            cv2.circle(img_with_bboxes_kps, (int(kp[0]), int(kp[1])), 5, (0, 255, 0), -1)
+    if bboxes is not None and kps is not None:
+        # one-person bbox and kp
+        assert bboxes.shape[0] == kps.shape[0], "Number of bboxes and kps must be the same"
+        for i in range(bboxes.shape[0]):
+            bbox_person = bboxes[i, ...]
+            kp_person = kps[i, ..., :2]
+            # specify color for each person
+            color = (np.random.randint(0, 255), np.random.randint(0, 255), np.random.randint(0, 255))
+            cv2.rectangle(img_with_bboxes_kps, (int(bbox_person[0]), int(bbox_person[1])), (int(bbox_person[2]), int(bbox_person[3])), color, 2)
+            for kp in kp_person :
+                cv2.circle(img_with_bboxes_kps, (int(kp[0]), int(kp[1])), 3, color, -1)
+
     return img_with_bboxes_kps
+
+def plot_bbox_test_image(img_folder, pkl_folder, output_folder):
+    for img_file in os.listdir(img_folder):
+        seg_name = img_file.split(".")[0].split("_")[0]
+        kp_idx = int(img_file.split(".")[0].split("_")[1])
+
+        pkl_file = os.path.join(pkl_folder, f"{seg_name}.pkl")
+        with open(pkl_file, "rb") as f:
+            data = pickle.load(f)
+        bboxes, kps = data[kp_idx]["bboxes"], data[kp_idx]["kps"]
+        
+        img = cv2.imread(os.path.join(img_folder, img_file))
+        img_with_bboxes_kps = plot_bboxes_kps(img, bboxes, kps)
+        cv2.imwrite(os.path.join(output_folder, img_file.replace(".jpg", f"_bbox_kps_{kp_idx}.jpg")), img_with_bboxes_kps)
 
 def main():
     # check pickle file
@@ -31,4 +52,8 @@ def main():
     print(data)
 
 if __name__ == "__main__":
-    main()
+    # main()
+    img_folder = "experiments/inputs/images_check"
+    pkl_folder = "experiments/inputs/bboxes_kps"
+    output_folder = "experiments/outputs/images_check"
+    plot_bbox_test_image(img_folder, pkl_folder, output_folder)
