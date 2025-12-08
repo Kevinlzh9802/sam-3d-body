@@ -95,18 +95,26 @@ def main(args):
         for folder_name in sorted(images_by_folder.keys()):
 
             folder_code = int(folder_name)
+            # folder code: 228, 429, ...
+            # filter out folders not in the interval
             if folder_code < args.segs_interval[0] or folder_code > args.segs_interval[1]:
                 continue
+            print(f"Processing folder: {folder_name}")
 
+            # sort images by index
             folder_images = sorted(images_by_folder[folder_name], key=lambda x: x[1])
+
+            # load bboxes and kps
             bboxes_kps_data = None
             if len(args.bbox_kp_folder):
                 keypoint_path = os.path.join(args.bbox_kp_folder, f"{folder_name}.pkl")
                 with open(keypoint_path, "rb") as kp_f:
                     bboxes_kps_data = pickle.load(kp_f)
-            for idx, (image_path, rel_path) in enumerate(folder_images):
-                rel_path_no_ext = os.path.splitext(rel_path)[0]
 
+            # process images
+            for _, (image_path, rel_path) in enumerate(folder_images):
+                rel_path_no_ext = os.path.splitext(rel_path)[0]
+                idx = int(rel_path_no_ext.split("_")[1])
                 try:
                     bboxes = bboxes_kps_data[idx]["bboxes"]
                     kps = bboxes_kps_data[idx]["kps"]
@@ -114,12 +122,6 @@ def main(args):
                 except:
                     print(f"Warning: No bboxes and kps found for {rel_path_no_ext}")
                     bboxes, kps = None, None
-
-                # print(f"Processing {rel_path_no_ext} with bboxes: {bboxes} and kps: {kps}")
-                # plot bboxes and kps
-                # img = cv2.imread(image_path)
-                # img_with_bboxes_kps = plot_bboxes_kps(img, bboxes, kps)
-                # cv2.imwrite(os.path.join(output_folder, f"{rel_path_no_ext}_bbox_kps.jpg"), img_with_bboxes_kps)
 
                 # outputs = estimator.process_one_image(
                 #     image_path,
@@ -129,7 +131,6 @@ def main(args):
                 #     inference_type="body",              # since we now manually prompt
                 #     keypoint_prompt=kps,    # <--- NEW
                 # )
-
 
                 outputs = run_mixed_sam3d_inference(
                     estimator,

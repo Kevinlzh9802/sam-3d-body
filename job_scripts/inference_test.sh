@@ -17,8 +17,8 @@ bind_local_path=/mnt/zli33
 sif_path=$bulk_path/large_builds/containers/detectron_env.sif
 
 sam_3d_body_path=$bind_local_path/projects/sam-3d-body
-input_folder=$bind_bulk_path/datasets/sam_3d_body/images_raw
-output_folder=$bind_bulk_path/datasets/sam_3d_body/outputs/images_with_kp
+input_folder=$bind_bulk_path/datasets/sam_3d_body/images_test
+output_folder=$bind_bulk_path/datasets/sam_3d_body/outputs/images_test
 kp_folder=$bind_bulk_path/datasets/sam_3d_body/bboxes_kps
 checkpoint_path=$bind_bulk_path/large_models/sam-3d-body-dinov3/model.ckpt
 mhr_path=$bind_bulk_path/large_models/sam-3d-body-dinov3/assets/mhr_model.pt
