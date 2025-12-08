@@ -310,21 +310,163 @@ def build_bboxex_kps_single(
 
 #     return user_bboxes, user_kps
 
-def refine_bboxes_kps(bbox_kp_folder: Path):
+def refine_bboxes_kps_single(
+    data,
+    img_width=IMG_WIDTH,
+    img_height=IMG_HEIGHT,
+    min_valid_kps=6,          # 1) minimum number of valid kps
+    min_area_ratio=0.002,      # 2) bbox area limits (as ratio of full image)
+    max_area_ratio=0.15,
+    min_hw_ratio=1/6,         # 3) height/width ratio limits
+    max_hw_ratio=6,
+    edge_sum_thresh=0.3,      # 4) keypoints too close to image edge (in normalized coords)
+    kps_are_normalized=False,  # whether kps[..., :2] are in [0,1]
+):
+    """
+    data: list of dicts, each with:
+        'bboxes': (N, 4) or None
+        'kps':    (N, 10, 3) or None
+
+    Modifies data in-place:
+        - removes persons that fail any condition
+        - sets bboxes/kps to empty arrays if no one remains
+    """
+
+    img_area = img_width * img_height
+
+    for idx, item in enumerate(data):
+        bboxes = item.get('bboxes', None)
+        kps = item.get('kps', None)
+
+        if bboxes is None or kps is None:
+            continue
+
+        bboxes = np.asarray(bboxes, dtype=float)
+        kps = np.asarray(kps, dtype=float)
+
+        if bboxes.ndim != 2 or bboxes.shape[1] != 4:
+            raise ValueError(f"Expected bboxes shape (N,4), got {bboxes.shape}")
+        if kps.ndim != 3 or kps.shape[1:] != (10, 3):
+            raise ValueError(f"Expected kps shape (N,10,3), got {kps.shape}")
+
+        N = bboxes.shape[0]
+        assert kps.shape[0] == N, "bboxes and kps must have same N"
+
+        keep_mask = np.ones(N, dtype=bool)
+
+        for i in range(N):
+            bbox = bboxes[i]       # [x1, y1, x2, y2]
+            kp_person = kps[i]     # (10, 3) [x, y, label]
+
+            # Skip if bbox has NaNs
+            if not np.all(np.isfinite(bbox)):
+                keep_mask[i] = False
+                continue
+
+            x1, y1, x2, y2 = bbox
+            w = max(0.0, x2 - x1)
+            h = max(0.0, y2 - y1)
+            area = w * h
+
+            # ------------------------------------------------------------------
+            # 1) #valid keypoints >= min_valid_kps
+            # ------------------------------------------------------------------
+            # valid if x,y finite (you could also include label >= 0 if you use -2 flag)
+            kp_xy = kp_person[:, :2]                   # (10,2)
+            kp_valid = np.isfinite(kp_xy).all(axis=-1) # (10,)
+            num_valid = int(kp_valid.sum())
+
+            if num_valid < min_valid_kps:
+                keep_mask[i] = False
+                continue
+
+            # ------------------------------------------------------------------
+            # 2) bbox too large or too small -> check area ratio
+            # ------------------------------------------------------------------
+            if area <= 0:
+                keep_mask[i] = False
+                continue
+
+            area_ratio = area / img_area
+            if area_ratio < min_area_ratio or area_ratio > max_area_ratio:
+                keep_mask[i] = False
+                continue
+
+            # ------------------------------------------------------------------
+            # 3) bbox height-width ratio too high/low
+            # ------------------------------------------------------------------
+            if w <= 0 or h <= 0:
+                keep_mask[i] = False
+                continue
+
+            hw_ratio = h / w  # height / width
+            if hw_ratio < min_hw_ratio or hw_ratio > max_hw_ratio:
+                keep_mask[i] = False
+                continue
+
+            # ------------------------------------------------------------------
+            # 4) keypoints too close to image edge
+            # ------------------------------------------------------------------
+            # Here we assume kp_xy is normalized to [0,1].
+            # If they are in pixels instead, replace this with kp_xy[...,0]/img_width etc.
+            if kps_are_normalized:
+                x_norm = kp_xy[kp_valid, 0]
+                y_norm = kp_xy[kp_valid, 1]
+            else:
+                x_norm = kp_xy[kp_valid, 0] / img_width
+                y_norm = kp_xy[kp_valid, 1] / img_height
+
+            if x_norm.size > 0:
+                # Distances in normalized units [0,1]
+                # left edge:   dist = x
+                # right edge:  dist = 1 - x
+                # top edge:    dist = y
+                # bottom edge: dist = 1 - y
+                left_sum   = float(np.sum(x_norm))
+                right_sum  = float(np.sum(1.0 - x_norm))
+                top_sum    = float(np.sum(y_norm))
+                bottom_sum = float(np.sum(1.0 - y_norm))
+
+                # If for any edge the total distance of all valid kps is
+                # very small, that means many kps are hugging that edge.
+                if (
+                    left_sum   < edge_sum_thresh or
+                    right_sum  < edge_sum_thresh or
+                    top_sum    < edge_sum_thresh or
+                    bottom_sum < edge_sum_thresh
+                ):
+                    keep_mask[i] = False
+                    continue
+
+        # Apply mask
+        bboxes_refined = bboxes[keep_mask]
+        kps_refined = kps[keep_mask]
+
+        # You can choose between [] or None if nothing remains; I'll use empty arrays
+        if bboxes_refined.size == 0:
+            bboxes_refined = np.empty((0, 4), dtype=float)
+            kps_refined = np.empty((0, 10, 3), dtype=float)
+
+        data[idx]['bboxes'] = bboxes_refined
+        data[idx]['kps'] = kps_refined
+
+    return data
+
+def refine_bboxes_kps(bbox_kp_folder: Path, output_folder: Path):
     """
     Refine bboxes and kps by removing invalid bboxes and kps.
     """
+    if not output_folder.exists():
+        output_folder.mkdir(parents=True)
     for pkl_file in bbox_kp_folder.glob("*.pkl"):
         with open(pkl_file, "rb") as f:
-            bboxes, kps = pickle.load(f)
-        valid_mask = np.isfinite(bboxes[:, 0]) & np.isfinite(bboxes[:, 1]) & np.isfinite(bboxes[:, 2]) & np.isfinite(bboxes[:, 3])
-        bboxes = bboxes[valid_mask]
-        kps = kps[valid_mask]
-        with open(pkl_file, "wb") as f:
-            pickle.dump((bboxes, kps), f)
+            data = pickle.load(f)
+        data = refine_bboxes_kps_single(data)
+        with open(output_folder / pkl_file.name, "wb") as f:
+            pickle.dump(data, f)
 
 
 if __name__ == "__main__":
     # build_save_bboxex_kps_all(Path("./experiments/bboxex_kps/"))
     # on linux
-    refine_bboxes_kps(Path("./experiments/inputs/bboxex_kps/"))
+    refine_bboxes_kps(Path("./experiments/inputs/bboxes_kps/"), Path("./experiments/inputs/bboxes_kps_refined/"))

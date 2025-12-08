@@ -75,6 +75,6 @@ def main():
 if __name__ == "__main__":
     # main()
     img_folder = "experiments/inputs/images_check"
-    pkl_folder = "experiments/inputs/bboxes_kps"
+    pkl_folder = "experiments/inputs/bboxes_kps_refined"
     output_folder = "experiments/outputs/images_check"
     plot_bbox_test_image(img_folder, pkl_folder, output_folder)
