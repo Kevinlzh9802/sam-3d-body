@@ -223,92 +223,92 @@ def build_bboxex_kps_single(
 
     return bboxes, keypoint_prompt
 
-def build_user_bboxes_and_keypoints(
-    frame_coords,
-    img_width,
-    img_height,
-    pad_ratio=0.15,
-    min_valid_kps=3,
-):
-    """
-    frame_coords: {person_id: (10,2) ndarray} with normalized x,y in [0,1].
-    Returns:
-      user_bboxes: (num_user, 4) or None
-      user_kps:    (num_user, 10, 3) or None   [x_px, y_px, mhr_label]
-    """
-    if frame_coords is None or len(frame_coords) == 0:
-        return None, None
+# def build_user_bboxes_and_keypoints(
+#     frame_coords,
+#     img_width,
+#     img_height,
+#     pad_ratio=0.15,
+#     min_valid_kps=3,
+# ):
+#     """
+#     frame_coords: {person_id: (10,2) ndarray} with normalized x,y in [0,1].
+#     Returns:
+#       user_bboxes: (num_user, 4) or None
+#       user_kps:    (num_user, 10, 3) or None   [x_px, y_px, mhr_label]
+#     """
+#     if frame_coords is None or len(frame_coords) == 0:
+#         return None, None
 
-    person_ids = sorted(frame_coords.keys())
-    all_bboxes = []
-    all_kps = []
+#     person_ids = sorted(frame_coords.keys())
+#     all_bboxes = []
+#     all_kps = []
 
-    for pid in person_ids:
-        coords = np.asarray(frame_coords[pid], dtype=float)  # (10,2)
-        if coords.shape != (10, 2):
-            raise ValueError(
-                f"Expected (10,2) coords per person, got {coords.shape} for person {pid}"
-            )
+#     for pid in person_ids:
+#         coords = np.asarray(frame_coords[pid], dtype=float)  # (10,2)
+#         if coords.shape != (10, 2):
+#             raise ValueError(
+#                 f"Expected (10,2) coords per person, got {coords.shape} for person {pid}"
+#             )
 
-        # valid if both x,y finite
-        valid_mask = np.isfinite(coords[:, 0]) & np.isfinite(coords[:, 1])
-        num_valid = int(valid_mask.sum())
-        if num_valid < min_valid_kps:
-            # skip if too few
-            continue
+#         # valid if both x,y finite
+#         valid_mask = np.isfinite(coords[:, 0]) & np.isfinite(coords[:, 1])
+#         num_valid = int(valid_mask.sum())
+#         if num_valid < min_valid_kps:
+#             # skip if too few
+#             continue
 
-        # clip and convert to px
-        coords_norm = np.clip(coords, 0.0, 1.0)
-        xs = coords_norm[:, 0] * img_width
-        ys = coords_norm[:, 1] * img_height
-        xy_pix = np.stack([xs, ys], axis=-1).astype(np.float32)  # (10,2)
+#         # clip and convert to px
+#         coords_norm = np.clip(coords, 0.0, 1.0)
+#         xs = coords_norm[:, 0] * img_width
+#         ys = coords_norm[:, 1] * img_height
+#         xy_pix = np.stack([xs, ys], axis=-1).astype(np.float32)  # (10,2)
 
-        xs_valid = xs[valid_mask]
-        ys_valid = ys[valid_mask]
+#         xs_valid = xs[valid_mask]
+#         ys_valid = ys[valid_mask]
 
-        x_min = xs_valid.min()
-        x_max = xs_valid.max()
-        y_min = ys_valid.min()
-        y_max = ys_valid.max()
+#         x_min = xs_valid.min()
+#         x_max = xs_valid.max()
+#         y_min = ys_valid.min()
+#         y_max = ys_valid.max()
 
-        w = x_max - x_min
-        h = y_max - y_min
-        if w <= 0:
-            w = img_width * 0.02
-        if h <= 0:
-            h = img_height * 0.02
+#         w = x_max - x_min
+#         h = y_max - y_min
+#         if w <= 0:
+#             w = img_width * 0.02
+#         if h <= 0:
+#             h = img_height * 0.02
 
-        cx = 0.5 * (x_min + x_max)
-        cy = 0.5 * (y_min + y_max)
+#         cx = 0.5 * (x_min + x_max)
+#         cy = 0.5 * (y_min + y_max)
 
-        pad_w = w * pad_ratio
-        pad_h = h * pad_ratio
+#         pad_w = w * pad_ratio
+#         pad_h = h * pad_ratio
 
-        x_min_p = max(0.0, cx - 0.5 * w - pad_w)
-        x_max_p = min(float(img_width - 1), cx + 0.5 * w + pad_w)
-        y_min_p = max(0.0, cy - 0.5 * h - pad_h)
-        y_max_p = min(float(img_height - 1), cy + 0.5 * h + pad_h)
+#         x_min_p = max(0.0, cx - 0.5 * w - pad_w)
+#         x_max_p = min(float(img_width - 1), cx + 0.5 * w + pad_w)
+#         y_min_p = max(0.0, cy - 0.5 * h - pad_h)
+#         y_max_p = min(float(img_height - 1), cy + 0.5 * h + pad_h)
 
-        bbox = np.array([x_min_p, y_min_p, x_max_p, y_max_p], dtype=np.float32)
+#         bbox = np.array([x_min_p, y_min_p, x_max_p, y_max_p], dtype=np.float32)
 
-        # [x, y, label]; default label -2 = invalid
-        labels = np.full((10,), -2.0, dtype=np.float32)
-        for j in range(10):
-            if valid_mask[j]:
-                labels[j] = float(MHR70_MAP[j])
+#         # [x, y, label]; default label -2 = invalid
+#         labels = np.full((10,), -2.0, dtype=np.float32)
+#         for j in range(10):
+#             if valid_mask[j]:
+#                 labels[j] = float(MHR70_MAP[j])
 
-        kps_with_labels = np.concatenate([xy_pix, labels[:, None]], axis=-1)  # (10,3)
+#         kps_with_labels = np.concatenate([xy_pix, labels[:, None]], axis=-1)  # (10,3)
 
-        all_bboxes.append(bbox)
-        all_kps.append(kps_with_labels)
+#         all_bboxes.append(bbox)
+#         all_kps.append(kps_with_labels)
 
-    if not all_bboxes:
-        return None, None
+#     if not all_bboxes:
+#         return None, None
 
-    user_bboxes = np.stack(all_bboxes, axis=0)   # (num_user, 4)
-    user_kps = np.stack(all_kps, axis=0)         # (num_user, 10, 3)
+#     user_bboxes = np.stack(all_bboxes, axis=0)   # (num_user, 4)
+#     user_kps = np.stack(all_kps, axis=0)         # (num_user, 10, 3)
 
-    return user_bboxes, user_kps
+#     return user_bboxes, user_kps
 
 
 if __name__ == "__main__":
