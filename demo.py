@@ -232,8 +232,9 @@ def run_mixed_sam3d_inference(
         det_boxes = estimator.detector.run_human_detection(
             im,
             det_cat_id=0,
-            score_thr=bbox_thr,
+            bbox_thr=bbox_thr,
             nms_thr=nms_thr,
+            default_to_full_image=False,
         )
         if det_boxes is None:
             det_boxes = np.zeros((0, 4), dtype=np.float32)
