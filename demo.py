@@ -286,9 +286,11 @@ def run_mixed_sam3d_inference(
             max_iou = float(ious[max_idx]) if len(ious) > 0 else 0.0
 
             if max_iou >= iou_merge_thr:
+                # do not override the detector box with the user box
+                pass
                 # treat as the same person; override that slot with user box + keypoints
-                combined_boxes[max_idx] = u_box
-                combined_kps[max_idx] = u_kps
+                # combined_boxes[max_idx] = u_box
+                # combined_kps[max_idx] = u_kps
             else:
                 # new person; append
                 combined_boxes.append(u_box)
