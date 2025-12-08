@@ -17,6 +17,7 @@ from sam_3d_body.data.utils.io import load_image
 from sam_3d_body.data.utils.prepare_batch import prepare_batch
 from sam_3d_body.utils import recursive_to
 from torchvision.transforms import ToTensor
+from tools.vis_utils_custom import bbox_iou
 
 
 class SAM3DBodyEstimator:
@@ -314,3 +315,6 @@ class SAM3DBodyEstimator:
                 )
 
         return all_out
+
+
+

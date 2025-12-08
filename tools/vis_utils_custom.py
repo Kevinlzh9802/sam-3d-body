@@ -44,6 +44,27 @@ def plot_bbox_test_image(img_folder, pkl_folder, output_folder):
         img_with_bboxes_kps = plot_bboxes_kps(img, bboxes, kps)
         cv2.imwrite(os.path.join(output_folder, img_file.replace(".jpg", f"_bbox_kps_{kp_idx}.jpg")), img_with_bboxes_kps)
 
+def bbox_iou(box_a, box_b):
+    """
+    box_a, box_b: [x_min, y_min, x_max, y_max]
+    returns scalar IoU
+    """
+    xA = max(box_a[0], box_b[0])
+    yA = max(box_a[1], box_b[1])
+    xB = min(box_a[2], box_b[2])
+    yB = min(box_a[3], box_b[3])
+
+    inter_w = max(0.0, xB - xA)
+    inter_h = max(0.0, yB - yA)
+    inter_area = inter_w * inter_h
+
+    area_a = max(0.0, box_a[2] - box_a[0]) * max(0.0, box_a[3] - box_a[1])
+    area_b = max(0.0, box_b[2] - box_b[0]) * max(0.0, box_b[3] - box_b[1])
+
+    denom = area_a + area_b - inter_area + 1e-6
+    return inter_area / denom
+
+
 def main():
     # check pickle file
     pickle_file = "experiments/bboxex_kps/428.pkl"
