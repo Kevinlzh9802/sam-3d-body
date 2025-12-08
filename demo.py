@@ -19,7 +19,6 @@ from sam_3d_body import load_sam_3d_body, SAM3DBodyEstimator
 # from tools.vis_utils import visualize_sample, visualize_sample_together
 from tqdm import tqdm
 from tools.vis_utils_custom import plot_bboxes_kps, kp_check, bbox_iou
-from tools.build_kp_bbox import build_user_bboxes_and_keypoints
 import cv2
 
 

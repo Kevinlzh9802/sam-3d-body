@@ -310,6 +310,21 @@ def build_bboxex_kps_single(
 
 #     return user_bboxes, user_kps
 
+def refine_bboxes_kps(bbox_kp_folder: Path):
+    """
+    Refine bboxes and kps by removing invalid bboxes and kps.
+    """
+    for pkl_file in bbox_kp_folder.glob("*.pkl"):
+        with open(pkl_file, "rb") as f:
+            bboxes, kps = pickle.load(f)
+        valid_mask = np.isfinite(bboxes[:, 0]) & np.isfinite(bboxes[:, 1]) & np.isfinite(bboxes[:, 2]) & np.isfinite(bboxes[:, 3])
+        bboxes = bboxes[valid_mask]
+        kps = kps[valid_mask]
+        with open(pkl_file, "wb") as f:
+            pickle.dump((bboxes, kps), f)
+
 
 if __name__ == "__main__":
-    build_save_bboxex_kps_all(Path("./experiments/bboxex_kps/"))
+    # build_save_bboxex_kps_all(Path("./experiments/bboxex_kps/"))
+    # on linux
+    refine_bboxes_kps(Path("./experiments/inputs/bboxex_kps/"))
