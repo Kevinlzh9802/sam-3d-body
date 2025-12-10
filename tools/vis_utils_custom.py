@@ -3,6 +3,7 @@ import numpy as np
 import pickle
 import torch
 import os
+import json
 
 def kp_check(filename, kps):
     assert isinstance(kps, np.ndarray), "Invalid keypoints type"
@@ -64,17 +65,72 @@ def bbox_iou(box_a, box_b):
     denom = area_a + area_b - inter_area + 1e-6
     return inter_area / denom
 
+def solve_pnp_person(output, bbox, K):
+    """
+    kps: (N, 10, 3)
+    bboxes: (N, 4)
+    returns (N, 3)
+    """
+    J_3d = output["mhr"]["pred_keypoints_3d"]
+    J_2d = output["mhr"]["pred_keypoints_2d"]  # in original image coords  
+    idxs = [0, 5, 6, 9, 10, 13, 14]  # example: nose, shoulders, hips, ankles
+    obj_points = J_3d[idxs].astype(np.float32)  # (N,3)
+    img_points = J_2d[idxs].astype(np.float32)  # (N,2)
+
+    assert J_2d.shape[0] == 1, "Number of kps and bboxes must be the same"
+        # solve pnp
+    success, rvec, tvec = cv2.solvePnP(
+        objectPoints=obj_points,
+        imagePoints=img_points,
+        cameraMatrix=K,
+        distCoeffs=None,
+        flags=cv2.SOLVEPNP_ITERATIVE,
+    )
+    if success:
+        print(f"Solved pnp for person")
+    else:
+        print(f"Failed to solve pnp for person")
+    R, _ = cv2.Rodrigues(rvec)   # (3,3)
+    t = tvec.reshape(3)          # (3,)
+    return R, t
+
+def solve_pnp_all(pkl_folder, output_folder, intrinsic_folder):
+    """
+    pkl_folder: str
+    output_folder: str
+    intrinsic_folder: str
+    returns None
+    """
+    for pkl_file in os.listdir(pkl_folder):
+        cam_num = int(pkl_file.split(".")[0].split("_")[0][0])
+        intrinsic_file = os.path.join(intrinsic_folder, f"intrinsic_{cam_num}.json")
+        with open(intrinsic_file, "r") as f:
+            data = json.load(f)
+            K = np.array(data["intrinsic"])
+        
+        pkl_file_path = os.path.join(pkl_folder, pkl_file)
+        with open(pkl_file_path, "rb") as f:
+            data = pickle.load(f)
+            outputs = data["outputs"]
+        for person_output in outputs: # iterate over each person
+            bbox = person_output["bbox"]
+            R, t = solve_pnp_person(person_output, bbox, K)
+            cv2.imwrite(os.path.join(output_folder, pkl_file.replace(".pkl", f"_pnp.jpg")), img)
 
 def main():
     # check pickle file
-    pickle_file = "experiments/bboxex_kps/428.pkl"
-    with open(pickle_file, "rb") as f:
-        data = pickle.load(f)
-    print(data)
+    # pickle_file = "experiments/bboxex_kps/428.pkl"
+    # with open(pickle_file, "rb") as f:
+    #     data = pickle.load(f)
+    # print(data)
+    pkl_folder = "experiments/inputs/pickles"
+    output_folder = "experiments/outputs/images_check"
+    intrinsic_folder = "experiments/inputs/intrinsics"
+    solve_pnp_all(pkl_folder, output_folder, intrinsic_folder)
 
 if __name__ == "__main__":
-    # main()
-    img_folder = "experiments/inputs/images_check"
-    pkl_folder = "experiments/inputs/bboxes_kps_refined"
-    output_folder = "experiments/outputs/images_check"
-    plot_bbox_test_image(img_folder, pkl_folder, output_folder)
+    main()
+    # img_folder = "experiments/inputs/images_check"
+    # pkl_folder = "experiments/inputs/bboxes_kps_refined"
+    # output_folder = "experiments/outputs/images_check"
+    # plot_bbox_test_image(img_folder, pkl_folder, output_folder)
