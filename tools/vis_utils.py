@@ -4,6 +4,8 @@ import cv2
 from sam_3d_body.visualization.renderer import Renderer
 from sam_3d_body.visualization.skeleton_visualizer import SkeletonVisualizer
 from sam_3d_body.metadata.mhr70 import pose_info as mhr70_pose_info
+import pyrender
+import trimesh
 
 LIGHT_BLUE = (0.65098039, 0.74117647, 0.85882353)
 
@@ -151,3 +153,83 @@ def visualize_sample_together(img_cv2, outputs, faces):
     cur_img = np.concatenate([img_cv2, img_keypoints, img_mesh, img_mesh_side], axis=1)
 
     return cur_img
+
+
+def visualize_world_floor(outputs, faces, render_res=(800, 800)):
+    """
+    Render all people using pred_vertices as already world-aligned coordinates.
+    Ignores per-person pred_cam_t; uses a fixed virtual camera.
+    """
+    # Gather vertices from all people
+    V_list = [o["pred_vertices"] for o in outputs]
+
+    # Use any focal length; we stored K[0,0] into each output
+    focal_length = float(outputs[0]["focal_length"])
+    renderer = Renderer(focal_length=focal_length, faces=faces)
+
+    # We treat V_list as already in camera/world coords -> use zero translations
+    cam_t_list = [np.zeros(3, dtype=np.float32) for _ in V_list]
+
+    rgba = renderer.render_rgba_multiple(
+        V_list[5:8],
+        cam_t_list[5:8],
+        rot_axis=[1, 0, 0],
+        rot_angle=0,
+        scene_bg_color=(1, 1, 1),
+        render_res=list(render_res),
+        focal_length=focal_length,
+    )
+    # rgba: H x W x 4 in [0,1]
+    rgb = (rgba[:, :, :3] * 255).astype(np.uint8)
+    return rgb
+
+
+def visualize_world_floor_interactive(outputs, faces, floor_height=0.0, floor_size=5.0):
+    """
+    Launch an interactive 3D viewer with all people placed using pred_vertices
+    in a shared (world) frame. Keeps visualize_sample_together untouched.
+    """
+    verts = []
+    all_faces = []
+    offset = 0
+    for o in outputs:
+        v = o["pred_vertices"]
+        verts.append(v)
+        all_faces.append(faces + offset)
+        offset += v.shape[0]
+    verts = np.concatenate(verts, axis=0)
+    all_faces = np.concatenate(all_faces, axis=0)
+
+    # People mesh
+    people_mesh = trimesh.Trimesh(verts, all_faces, process=False)
+    people_node = pyrender.Mesh.from_trimesh(people_mesh, smooth=True)
+
+    # Simple floor plane for reference
+    plane = trimesh.creation.box(extents=(floor_size, 0.01, floor_size))
+    plane.apply_translation([0, floor_height - 0.005, 0])
+    plane_node = pyrender.Mesh.from_trimesh(plane, smooth=False)
+
+    scene = pyrender.Scene(bg_color=[1.0, 1.0, 1.0, 1.0], ambient_light=(0.3, 0.3, 0.3))
+    scene.add(people_node)
+    scene.add(plane_node)
+
+    camera = pyrender.PerspectiveCamera(yfov=np.deg2rad(60.0))
+    cam_pose = np.eye(4)
+    cam_pose[:3, 3] = np.array([0, 1.5, 4.0])
+    scene.add(camera, pose=cam_pose)
+
+    # Compatibility for NumPy 2.0 where np.infty was removed.
+    if not hasattr(np, "infty"):
+        np.infty = np.inf
+
+    try:
+        pyrender.Viewer(scene, use_raymond_lighting=True, point_size=2)
+    except Exception as e:
+        print(
+            f"pyrender.Viewer failed (likely due to missing onscreen GL): {e}. "
+            "Falling back to offscreen render."
+        )
+        r = pyrender.OffscreenRenderer(viewport_width=800, viewport_height=800)
+        color, _ = r.render(scene)
+        r.delete()
+        return color

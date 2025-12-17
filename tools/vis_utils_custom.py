@@ -87,9 +87,9 @@ def sanity_check_2d(J_3d, J_2d, R, t, K):
     mean_err = errors.mean()
     max_err = errors.max()
 
-    print("Reprojection sanity check:")
-    print(f"  Mean error: {mean_err:.3f} px")
-    print(f"  Max error:  {max_err:.3f} px")
+    # print("Reprojection sanity check:")
+    # print(f"  Mean error: {mean_err:.3f} px")
+    # print(f"  Max error:  {max_err:.3f} px")
     return mean_err, max_err
 
 def solve_pnp_person(output, K, dist_coeffs):
@@ -118,9 +118,9 @@ def solve_pnp_person(output, K, dist_coeffs):
     t = tvec.reshape(3)          # (3,)
 
     # 2d sanity check
-    mean_err, max_err = sanity_check_2d(J_3d, J_2d, R, t, K)
-    if mean_err > 1.0 or max_err > 2.0:
-        print(f"2d sanity check failed")
+    # mean_err, max_err = sanity_check_2d(J_3d, J_2d, R, t, K)
+    # if mean_err > 1.0 or max_err > 2.0:
+    #     print(f"2d sanity check failed")
     return R, t
 
 def adjust_K(K, scale_factor):
@@ -152,19 +152,52 @@ def solve_pnp_all(pkl_folder, output_folder, intrinsic_folder):
             data = pickle.load(f)
         outputs = data["outputs"]
         data_copy = data.copy()
-        frame_coords_2d = []
-        for idx, person_output in enumerate(outputs): # iterate over each person
+
+        # --- 1) PnP for each person, store camera-frame joints/verts ---
+        frame_J_cam = []
+        frame_V_cam = []
+        for idx, person_output in enumerate(outputs):
             R, t = solve_pnp_person(person_output, K, dist_coeffs)
-            # transform 3d vertices and joints to camera frame
+
             J_3d = person_output["pred_keypoints_3d"]
-            V_3d = person_output["pred_vertices"]   # (num_verts, 3) in canonical frame
-            J_cam = (R @ J_3d.T).T + t              # same for joints
-            V_cam = (R @ V_3d.T).T + t              # now in your camera frame
-            frame_coords_2d.append(J_cam)
-            
-            data_copy["outputs"][idx]["pred_vertices"] = V_cam
-            data_copy["outputs"][idx]["pred_cam_t"] = np.zeros(3)  # stop adding pred_cam_t, this is done in the renderer
+            V_3d = person_output["pred_vertices"]
+
+            J_cam = (R @ J_3d.T).T + t
+            V_cam = (R @ V_3d.T).T + t
+
+            frame_J_cam.append(J_cam)
+            frame_V_cam.append(V_cam)
+
+        # --- 2) Fit ONE ground plane using all foot joints in this frame ---
+        all_foot_points = []
+        for J_cam in frame_J_cam:
+            all_foot_points.append(filter_foot_points(J_cam))  # uses MHR70 indices
+        all_foot_points = np.concatenate(all_foot_points, axis=0)
+
+        print(img_id, "world foot Y min/max:",
+              all_foot_points[:,1].min(),
+              all_foot_points[:,1].max())
+
+        n, d, p0 = fit_plane(all_foot_points)
+        R_world = make_world_transform(n)  # camera -> world
+
+        # (optional) print RMS to check:
+        dists = np.abs(all_foot_points @ n + d)
+        print(img_id, "RMS distance to plane:", np.sqrt((dists**2).mean()))
+
+        # --- 3) Apply this SAME world transform to all people ---
+        frame_coords_2d = []
+        for idx, (J_cam, V_cam) in enumerate(zip(frame_J_cam, frame_V_cam)):
+            V_world = (R_world @ (V_cam - p0).T).T  # (V,3)
+            J_world = (R_world @ (J_cam - p0).T).T  # (J,3)
+
+            data_copy["outputs"][idx]["pred_vertices"] = V_world.astype(np.float32)
+            # renderer will treat these as "in a shared world/camera frame"
+            data_copy["outputs"][idx]["pred_cam_t"] = np.zeros(3, dtype=np.float32)
             data_copy["outputs"][idx]["focal_length"] = K[0, 0]
+
+            frame_coords_2d.append(J_world)
+
         with open(os.path.join(output_folder, f"{img_id}.pkl"), "wb") as f:
             pickle.dump(data_copy, f)
             # cv2.imwrite(os.path.join(output_folder, pkl_file.replace(".pkl", f"_pnp.jpg")), img)
@@ -186,6 +219,67 @@ def plot_calibration_image(J_cam, padding=20):
         pt = Jcam_cm[i, :2] + shift
         cv2.circle(img_with_joints, (int(pt[0]), int(pt[1])), 3, (0, 255, 0), -1)
     return img_with_joints
+
+def filter_foot_points(J_cam):
+    foot_indices = [13, 14, 15, 18]  # adjust as you like
+    return J_cam[foot_indices]
+
+def fit_plane(points):
+    """
+    points: (M,3)
+    returns: normal n (3,), offset d, and a point on the plane p0 (3,)
+    """
+    # Center the data
+    centroid = points.mean(axis=0)
+    X = points - centroid
+
+    # SVD on covariance
+    _, _, vh = np.linalg.svd(X, full_matrices=False)
+    n = vh[-1]                # normal = last singular vector
+    n = n / np.linalg.norm(n)
+
+    # plane equation: n^T (X - centroid) = 0 -> n^T X + d = 0
+    d = -np.dot(n, centroid)
+    return n, d, centroid
+
+
+def make_world_transform(n):
+    """
+    n: plane normal in camera coords (unit vector)
+    returns: R_world (3,3) mapping camera -> world
+             such that R_world @ n ≈ [0, 1, 0]
+    """
+    up = np.array([0., 1., 0.])  # world up
+
+    # axis to rotate around = n x up
+    axis = np.cross(n, up)
+    norm_axis = np.linalg.norm(axis)
+
+    if norm_axis < 1e-6:
+        # n already aligned with up or down
+        if np.dot(n, up) > 0:
+            R_world = np.eye(3)
+        else:
+            # flip 180 degrees
+            R_world = np.diag([1, -1, -1])
+        return R_world
+
+    axis = axis / norm_axis
+    angle = np.arccos(np.clip(np.dot(n, up), -1.0, 1.0))
+
+    # Rodrigues formula
+    K = np.array([
+        [0, -axis[2], axis[1]],
+        [axis[2], 0, -axis[0]],
+        [-axis[1], axis[0], 0],
+    ])
+    R_world = (
+        np.eye(3)
+        + np.sin(angle) * K
+        + (1 - np.cos(angle)) * (K @ K)
+    )
+    return R_world
+
 
 def main():
     # check pickle file
