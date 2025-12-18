@@ -3,6 +3,7 @@ import numpy as np
 from aitviewer.viewer import Viewer
 # from aitviewer.renderables.smpl import SMPLSequence
 from aitviewer.renderables.meshes import Meshes
+from aitviewer.renderables.plane import Plane
 import os
 import pickle
 import sys
@@ -33,9 +34,12 @@ def visualize_multi_person(vertices, faces, id_range=None):
     for k in range(vertices.shape[0]):  
         if id_range is None or (k >= id_range[0] and k <= id_range[1]):
             vertices_k = vertices[k, ...]
+            # vertices_k = vertices_k[:, [0, 2, 1]]  # aitviewer expects Y-up
             mesh = Meshes(vertices=vertices_k, faces=faces, name=f"Person_{k}")
             v.scene.add(mesh)
-    
+
+    v.scene.floor.plane = "xy"
+    v.scene.floor.side_length = 1000
     v.run()
     return v
 

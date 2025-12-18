@@ -263,124 +263,136 @@ def project_2d_to_ground(uv_2d, K, R_cam, t_cam, world_up=np.array([0., 0., 1.])
 
 
 def align_person_to_ground_extrinsics(
-    J_3d_body, V_3d_body, J_2d, K, R_cam, t_cam, 
+    J_3d_body, V_3d_body, J_2d, K, R_cam, t_cam_original, 
+    R_pnp, t_pnp,
     foot_indices=FOOT_INDICES, world_up=np.array([0., 0., 1.]),
+    image_scale=1.0, extrinsics_scale=0.01,
     verbose=False
 ):
     """
     Align a person's 3D pose to the ground using camera extrinsics.
     
     Strategy:
-    1. Project 2D foot keypoints onto the ground plane → get ground-truth 3D foot positions
-    2. Use Procrustes alignment (R, t, scale) to match body feet to ground-projected feet
-    3. Apply the same transform to full body mesh
+    1. Use PnP result (R_pnp, t_pnp) to transform body to camera frame (preserves orientation)
+    2. Use camera extrinsics to transform from camera frame to world frame
+    3. Project 2D foot keypoints onto ground plane to get ground-truth XY position
+    4. Adjust Z (height) so feet are on the ground
+    
+    All outputs are in METERS.
     
     Args:
-        J_3d_body: (70, 3) 3D keypoints in body-canonical frame (from SAM3D)
-        V_3d_body: (V, 3) vertices in body-canonical frame
-        J_2d: (70, 2) 2D keypoints in image
-        K: (3, 3) camera intrinsic matrix
-        R_cam: (3, 3) camera rotation (world to camera)
-        t_cam: (3,) camera translation (world to camera)
+        J_3d_body: (70, 3) 3D keypoints in body-canonical frame (from SAM3D, in meters)
+        V_3d_body: (V, 3) vertices in body-canonical frame (in meters)
+        J_2d: (70, 2) 2D keypoints in image (at SAM3D input resolution)
+        K: (3, 3) camera intrinsic matrix (scaled to match SAM3D input resolution)
+        R_cam: (3, 3) camera rotation (world to camera) from extrinsics
+        t_cam_original: (3,) camera translation (world to camera) from extrinsics (in original units, e.g., cm)
+        R_pnp: (3, 3) rotation from PnP (body to camera)
+        t_pnp: (3,) translation from PnP (body to camera, in meters)
         foot_indices: list of foot keypoint indices
-        world_up: (3,) world up direction
-            - [0, 0, 1] for Z-up (ground at Z=0) - your calibration uses this
-            - [0, 1, 0] for Y-up (ground at Y=0)
+        world_up: (3,) world up direction [0,0,1] for Z-up
+        image_scale: scale factor for 2D keypoints (e.g., 2.0 if extrinsics at 1920x1080 but J_2d at 960x540)
+        extrinsics_scale: scale to convert extrinsics translation to meters (e.g., 0.01 if extrinsics are in cm)
         verbose: whether to print debug info
         
     Returns:
-        J_world: (70, 3) aligned keypoints in world coordinates
-        V_world: (V, 3) aligned vertices in world coordinates  
+        J_world: (70, 3) aligned keypoints in world coordinates (in METERS)
+        V_world: (V, 3) aligned vertices in world coordinates (in METERS)
         alignment_info: dict with alignment details
     """
-    # Step 1: Get ground-truth foot positions by projecting 2D onto ground plane
-    foot_2d = J_2d[foot_indices]  # (4, 2)
-    foot_world_gt, foot_valid = project_2d_to_ground(foot_2d, K, R_cam, t_cam, world_up)
-    foot_world_gt = np.atleast_2d(foot_world_gt)
+    up_axis = np.argmax(np.abs(world_up))  # 2 for Z-up, 1 for Y-up
+    up_name = ['X', 'Y', 'Z'][up_axis]
+    
+    # Convert extrinsics translation to meters
+    t_cam = t_cam_original * extrinsics_scale  # cm -> m
+    
+    # Step 1: Transform body to camera frame using PnP result
+    # This preserves the body orientation!
+    J_cam = (R_pnp @ J_3d_body.T).T + t_pnp  # in meters
+    V_cam = (R_pnp @ V_3d_body.T).T + t_pnp  # in meters
+    
+    # Step 2: Transform from camera frame to world frame using extrinsics
+    # P_cam = R_cam @ P_world + t_cam  =>  P_world = R_cam^T @ (P_cam - t_cam)
+    # Now both are in meters!
+    R_cam_inv = R_cam.T
+    J_world = (R_cam_inv @ (J_cam - t_cam).T).T  # in meters
+    V_world = (R_cam_inv @ (V_cam - t_cam).T).T  # in meters
+    
+    # Step 3: Get ground-truth foot XY by projecting 2D onto ground plane
+    # Need to scale 2D keypoints if they're at different resolution than extrinsics
+    foot_2d = J_2d[foot_indices] * image_scale  # Scale to extrinsics resolution
+    
+    # Also need K at extrinsics resolution
+    K_full = K.copy()
+    K_full[0, 0] *= image_scale
+    K_full[1, 1] *= image_scale
+    K_full[0, 2] *= image_scale
+    K_full[1, 2] *= image_scale
+    
+    # Project to ground - need extrinsics in original units for this
+    foot_world_gt_original, foot_valid = project_2d_to_ground(
+        foot_2d, K_full, R_cam, t_cam_original, world_up
+    )
+    foot_world_gt_original = np.atleast_2d(foot_world_gt_original)
     foot_valid = np.atleast_1d(foot_valid)
     
+    # Convert to meters
+    foot_world_gt = foot_world_gt_original * extrinsics_scale
+    
     if verbose:
-        up_axis = np.argmax(np.abs(world_up))
-        up_name = ['X', 'Y', 'Z'][up_axis]
-        print(f"  Ground-truth foot positions (world, {up_name}-up):")
+        print(f"  Ground-truth foot positions (world, {up_name}-up, in meters):")
         for i, (name, pos, valid) in enumerate(zip(FOOT_NAMES, foot_world_gt, foot_valid)):
             status = "OK" if valid else "BEHIND_CAMERA"
-            print(f"    {name}: [{pos[0]:.4f}, {pos[1]:.4f}, {pos[2]:.4f}] ({status})")
+            print(f"    {name}: [{pos[0]:.3f}, {pos[1]:.3f}, {pos[2]:.4f}] ({status})")
     
     if not foot_valid.any():
         print("  WARNING: All foot projections behind camera!")
         return None, None, {"success": False, "reason": "all_feet_behind_camera"}
     
-    # Step 2: Get foot positions in body frame
-    foot_body = J_3d_body[foot_indices]  # (4, 3)
+    # Step 4: Compute the height adjustment needed
+    # The feet from PnP+extrinsics should be close to the ground, but not exactly on it
+    # due to depth errors. We shift along the up axis to put feet on ground.
+    foot_world_current = J_world[foot_indices]
+    valid_foot_heights = foot_world_current[foot_valid, up_axis]
     
-    # Step 3: Solve for rigid transform (R, t, s) that maps body feet to world feet
-    # Using Procrustes alignment with scale
+    # Use the minimum foot height (the foot that should be on ground)
+    min_foot_height = valid_foot_heights.min()
+    height_adjustment = -min_foot_height  # Shift so min foot is at Z=0
     
-    # Use only valid feet
-    valid_foot_body = foot_body[foot_valid]
-    valid_foot_world = foot_world_gt[foot_valid]
-    
-    if len(valid_foot_body) < 2:
-        print("  WARNING: Need at least 2 valid feet for alignment")
-        return None, None, {"success": False, "reason": "insufficient_feet"}
-    
-    # Procrustes: find R, t, s such that s * R @ body + t ≈ world
-    # Center both point sets
-    centroid_body = valid_foot_body.mean(axis=0)
-    centroid_world = valid_foot_world.mean(axis=0)
-    
-    body_centered = valid_foot_body - centroid_body
-    world_centered = valid_foot_world - centroid_world
-    
-    # Compute scale
-    scale_body = np.sqrt((body_centered ** 2).sum())
-    scale_world = np.sqrt((world_centered ** 2).sum())
-    s = scale_world / (scale_body + 1e-10)
-    
-    # Compute rotation using SVD
-    H = body_centered.T @ world_centered
-    U, _, Vt = np.linalg.svd(H)
-    R_align = Vt.T @ U.T
-    
-    # Handle reflection
-    if np.linalg.det(R_align) < 0:
-        Vt[-1, :] *= -1
-        R_align = Vt.T @ U.T
-    
-    # Compute translation
-    t_align = centroid_world - s * R_align @ centroid_body
-    
-    # Step 4: Apply transform to all joints and vertices
-    J_world = s * (R_align @ J_3d_body.T).T + t_align
-    V_world = s * (R_align @ V_3d_body.T).T + t_align
+    # Apply height adjustment
+    J_world[:, up_axis] += height_adjustment
+    V_world[:, up_axis] += height_adjustment
     
     # Step 5: Verify alignment
     foot_world_aligned = J_world[foot_indices]
-    foot_errors = np.linalg.norm(foot_world_aligned[foot_valid] - valid_foot_world, axis=1)
+    
+    # Compute error: how far are feet from their projected ground positions (in XY)?
+    # We only adjusted Z, so XY error shows PnP+extrinsics accuracy
+    floor_axes = [i for i in range(3) if i != up_axis]
+    xy_errors = np.linalg.norm(
+        foot_world_aligned[foot_valid][:, floor_axes] - foot_world_gt[foot_valid][:, floor_axes], 
+        axis=1
+    )
     
     alignment_info = {
         "success": True,
-        "scale": s,
-        "R_align": R_align,
-        "t_align": t_align,
-        "foot_errors": foot_errors,
-        "mean_foot_error": foot_errors.mean(),
-        "max_foot_error": foot_errors.max(),
+        "height_adjustment": height_adjustment,  # in meters
+        "xy_errors": xy_errors,  # in meters
+        "mean_xy_error": xy_errors.mean(),
+        "max_xy_error": xy_errors.max(),
         "num_valid_feet": foot_valid.sum(),
-        "foot_world_gt": foot_world_gt,
-        "foot_world_aligned": foot_world_aligned,
+        "foot_world_gt": foot_world_gt,  # in meters
+        "foot_world_aligned": foot_world_aligned,  # in meters
+        "extrinsics_scale": extrinsics_scale,
+        "image_scale": image_scale,
     }
     
     if verbose:
-        # Determine up axis (Z=2 for Z-up, Y=1 for Y-up)
-        up_axis = np.argmax(np.abs(world_up))
-        up_name = ['X', 'Y', 'Z'][up_axis]
         print(f"  Alignment result:")
-        print(f"    Scale factor: {s:.4f}")
-        print(f"    Mean foot error: {foot_errors.mean()*100:.2f} cm")
-        print(f"    Max foot error: {foot_errors.max()*100:.2f} cm")
-        print(f"    Aligned foot {up_name} (should be ~0): {foot_world_aligned[:,up_axis].mean():.4f}")
+        print(f"    Height adjustment: {height_adjustment:.4f} m")
+        print(f"    Mean XY error: {xy_errors.mean():.4f} m ({xy_errors.mean()*100:.2f} cm)")
+        print(f"    Max XY error: {xy_errors.max():.4f} m ({xy_errors.max()*100:.2f} cm)")
+        print(f"    Aligned foot {up_name} range: {foot_world_aligned[:,up_axis].min():.4f} to {foot_world_aligned[:,up_axis].max():.4f} m")
     
     return J_world, V_world, alignment_info
 
@@ -566,6 +578,9 @@ def solve_pnp_all(pkl_folder, output_folder, intrinsic_folder, verbose=True,
                 person_output, K, dist_coeffs, 
                 person_idx=idx, verbose=verbose
             )
+            # Store R and t in the quality dict for later use
+            pnp_quality["R"] = R
+            pnp_quality["t"] = t
             frame_pnp_quality.append(pnp_quality)
 
             J_3d = person_output["pred_keypoints_3d"]
@@ -665,72 +680,84 @@ def solve_pnp_all(pkl_folder, output_folder, intrinsic_folder, verbose=True,
             # Load extrinsics for this camera
             extrinsic_file = os.path.join(extrinsic_folder, f"extrinsic_{cam_num}_zh.json")
             if not os.path.exists(extrinsic_file):
-                print(f"  WARNING: Extrinsic file not found: {extrinsic_file}")
-                print(f"  Falling back to per_person mode for this frame")
-                # Fall back to per_person for this frame
-                n, d, p0 = fit_plane(all_foot_points)
-                R_world = make_world_transform(n)
-                for idx, (J_cam, V_cam) in enumerate(zip(frame_J_cam, frame_V_cam)):
-                    V_world = (R_world @ (V_cam - p0).T).T
-                    J_world = (R_world @ (J_cam - p0).T).T
-                    foot_J_world = J_world[FOOT_INDICES]
-                    min_foot_y = foot_J_world[:, 1].min()
-                    V_world[:, 1] -= min_foot_y
-                    J_world[:, 1] -= min_foot_y
-                    data_copy["outputs"][idx]["pred_vertices"] = V_world.astype(np.float32)
-                    data_copy["outputs"][idx]["pred_keypoints_3d_world"] = J_world.astype(np.float32)
-                    data_copy["outputs"][idx]["pred_cam_t"] = np.zeros(3, dtype=np.float32)
-                    data_copy["outputs"][idx]["focal_length"] = K[0, 0]
-            else:
-                R_cam, t_cam = load_camera_extrinsics(extrinsic_file)
+                raise ValueError(f"Extrinsic file not found: {extrinsic_file}") 
+
+            R_cam_ext, t_cam_ext = load_camera_extrinsics(extrinsic_file)
+            t_cam_ext = t_cam_ext.flatten()  # Ensure 1D
+            
+            # Configuration for your setup:
+            # - Extrinsics calibrated at full resolution (1920x1080) with world in cm
+            # - SAM3D 2D keypoints at half resolution (960x540)
+            # - SAM3D 3D body in meters
+            # - Output will be in METERS
+            IMAGE_SCALE = 2.0        # SAM3D is at 960x540, extrinsics at 1920x1080
+            EXTRINSICS_SCALE = 0.01  # Extrinsics translation is in cm, convert to meters
+            
+            print(f"\n[{img_id}] Extrinsics-based ground alignment:")
+            print(f"  World up direction: {WORLD_UP} ({'Z-up' if WORLD_UP[2] > 0.5 else 'Y-up'})")
+            print(f"  Image scale: {IMAGE_SCALE}x (SAM3D to extrinsics resolution)")
+            print(f"  Extrinsics scale: {EXTRINSICS_SCALE} (extrinsics units to meters)")
+            print(f"  Output units: METERS")
+            cam_pos_m = -R_cam_ext.T @ (t_cam_ext * EXTRINSICS_SCALE)
+            print(f"  Camera position (world, meters): [{cam_pos_m[0]:.2f}, {cam_pos_m[1]:.2f}, {cam_pos_m[2]:.2f}]")
+            
+            # Get ground plane in camera coords for reference
+            n_cam, d_cam = get_ground_plane_in_camera(R_cam_ext, t_cam_ext, world_up=WORLD_UP)
+            print(f"  Ground plane normal (camera): [{n_cam[0]:.4f}, {n_cam[1]:.4f}, {n_cam[2]:.4f}]")
+            
+            # Determine which axis is "up" in world coords
+            up_axis = np.argmax(np.abs(WORLD_UP))  # 2 for Z-up, 1 for Y-up
+            
+            successful_alignments = 0
+            for idx, person_output in enumerate(outputs):
+                J_3d_body = person_output["pred_keypoints_3d"]
+                V_3d_body = person_output["pred_vertices"]
+                J_2d = person_output["pred_keypoints_2d"]
                 
-                print(f"\n[{img_id}] Extrinsics-based ground alignment:")
-                print(f"  World up direction: {WORLD_UP} ({'Z-up' if WORLD_UP[2] > 0.5 else 'Y-up'})")
-                print(f"  Camera position (world): {(-R_cam.T @ t_cam)}")
+                # Get the PnP result for this person
+                R_pnp = frame_pnp_quality[idx].get("R", None)
+                t_pnp = frame_pnp_quality[idx].get("t", None)
                 
-                # Get ground plane in camera coords for reference
-                n_cam, d_cam = get_ground_plane_in_camera(R_cam, t_cam, world_up=WORLD_UP)
-                print(f"  Ground plane normal (camera): [{n_cam[0]:.4f}, {n_cam[1]:.4f}, {n_cam[2]:.4f}]")
+                # If PnP result not stored, recompute (shouldn't happen normally)
+                if R_pnp is None:
+                    R_pnp, t_pnp, _ = solve_pnp_person(person_output, K, dist_coeffs, idx, verbose=False)
                 
-                # Determine which axis is "up" in world coords for fallback
-                up_axis = np.argmax(np.abs(WORLD_UP))  # 2 for Z-up, 1 for Y-up
+                print(f"\n  Person {idx}:")
+                J_world, V_world, align_info = align_person_to_ground_extrinsics(
+                    J_3d_body, V_3d_body, J_2d, K, R_cam_ext, t_cam_ext,
+                    R_pnp=R_pnp, t_pnp=t_pnp,
+                    foot_indices=FOOT_INDICES, world_up=WORLD_UP,
+                    image_scale=IMAGE_SCALE, extrinsics_scale=EXTRINSICS_SCALE,
+                    verbose=verbose
+                )
                 
-                successful_alignments = 0
-                for idx, person_output in enumerate(outputs):
-                    J_3d_body = person_output["pred_keypoints_3d"]
-                    V_3d_body = person_output["pred_vertices"]
-                    J_2d = person_output["pred_keypoints_2d"]
-                    
-                    print(f"\n  Person {idx}:")
-                    J_world, V_world, align_info = align_person_to_ground_extrinsics(
-                        J_3d_body, V_3d_body, J_2d, K, R_cam, t_cam,
-                        foot_indices=FOOT_INDICES, world_up=WORLD_UP, verbose=verbose
-                    )
-                    
-                    if J_world is None:
-                        print(f"    FAILED: {align_info.get('reason', 'unknown')}")
-                        # Fall back: use PnP result with per-person shift
-                        J_cam, V_cam = frame_J_cam[idx], frame_V_cam[idx]
-                        # Transform to world using extrinsics
-                        R_cam_inv = R_cam.T
-                        J_world = (R_cam_inv @ (J_cam - t_cam).T).T
-                        V_world = (R_cam_inv @ (V_cam - t_cam).T).T
-                        # Shift to ground along the up axis
-                        min_foot_up = J_world[FOOT_INDICES, up_axis].min()
-                        J_world[:, up_axis] -= min_foot_up
-                        V_world[:, up_axis] -= min_foot_up
-                        print(f"    Fallback: shifted by {-min_foot_up:.4f}m along axis {up_axis}")
-                    else:
-                        successful_alignments += 1
-                        data_copy["outputs"][idx]["alignment_scale"] = float(align_info["scale"])
-                        data_copy["outputs"][idx]["alignment_foot_error"] = float(align_info["mean_foot_error"])
-                    
-                    data_copy["outputs"][idx]["pred_vertices"] = V_world.astype(np.float32)
-                    data_copy["outputs"][idx]["pred_keypoints_3d_world"] = J_world.astype(np.float32)
-                    data_copy["outputs"][idx]["pred_cam_t"] = np.zeros(3, dtype=np.float32)
-                    data_copy["outputs"][idx]["focal_length"] = K[0, 0]
+                if J_world is None:
+                    print(f"    FAILED: {align_info.get('reason', 'unknown')}")
+                    # Fall back: use PnP result with per-person shift (output in meters)
+                    J_cam = (R_pnp @ J_3d_body.T).T + t_pnp  # meters
+                    V_cam = (R_pnp @ V_3d_body.T).T + t_pnp  # meters
+                    # Transform to world (convert extrinsics t to meters)
+                    t_cam_m = t_cam_ext * EXTRINSICS_SCALE
+                    R_cam_inv = R_cam_ext.T
+                    J_world = (R_cam_inv @ (J_cam - t_cam_m).T).T  # meters
+                    V_world = (R_cam_inv @ (V_cam - t_cam_m).T).T  # meters
+                    # Shift to ground along the up axis
+                    min_foot_up = J_world[FOOT_INDICES, up_axis].min()
+                    J_world[:, up_axis] -= min_foot_up
+                    V_world[:, up_axis] -= min_foot_up
+                    print(f"    Fallback: shifted by {-min_foot_up:.4f} m along axis {up_axis}")
+                else:
+                    successful_alignments += 1
+                    data_copy["outputs"][idx]["height_adjustment_m"] = float(align_info["height_adjustment"])
+                    data_copy["outputs"][idx]["mean_xy_error_m"] = float(align_info["mean_xy_error"])
                 
-                print(f"\n  Summary: {successful_alignments}/{len(outputs)} people aligned successfully")
+                data_copy["outputs"][idx]["pred_vertices"] = V_world.astype(np.float32)
+                data_copy["outputs"][idx]["pred_keypoints_3d_world"] = J_world.astype(np.float32)
+                data_copy["outputs"][idx]["pred_cam_t"] = np.zeros(3, dtype=np.float32)
+                data_copy["outputs"][idx]["focal_length"] = K[0, 0]
+                data_copy["outputs"][idx]["world_units"] = "meters"
+            
+            print(f"\n  Summary: {successful_alignments}/{len(outputs)} people aligned successfully")
         
         else:
             raise ValueError(f"Unknown alignment_mode: {alignment_mode}")
