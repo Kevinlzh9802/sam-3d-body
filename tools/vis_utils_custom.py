@@ -117,25 +117,9 @@ def load_camera_extrinsics(extrinsic_file):
     """
     with open(extrinsic_file, "r") as f:
         data = json.load(f)
-    
-    # Try different key names
-    if "R" in data:
-        R_cam = np.array(data["R"], dtype=np.float64)
-    elif "rotation" in data:
-        R_cam = np.array(data["rotation"], dtype=np.float64)
-    elif "rvec" in data:
-        rvec = np.array(data["rvec"], dtype=np.float64)
-        R_cam, _ = cv2.Rodrigues(rvec)
-    else:
-        raise KeyError("Could not find rotation in extrinsics file (expected 'R', 'rotation', or 'rvec')")
-    
-    if "t" in data:
-        t_cam = np.array(data["t"], dtype=np.float64).flatten()
-    elif "translation" in data:
-        t_cam = np.array(data["translation"], dtype=np.float64).flatten()
-    else:
-        raise KeyError("Could not find translation in extrinsics file (expected 't' or 'translation')")
-    
+
+    R_cam = np.array(data["rotation"], dtype=np.float64)
+    t_cam = np.array(data["translation"], dtype=np.float64).flatten()
     return R_cam, t_cam
 
 
@@ -521,8 +505,7 @@ def adjust_K(K, scale_factor):
     return K_resized
 
 def solve_pnp_all(pkl_folder, output_folder, intrinsic_folder, verbose=True, 
-                   alignment_mode="per_person", ransac_threshold=0.10,
-                   extrinsic_folder=None):
+                   alignment_mode="extrinsics", extrinsic_folder=None):
     """
     Solve PnP for all people in all frames, align to ground, and transform to world coords.
     
@@ -533,10 +516,8 @@ def solve_pnp_all(pkl_folder, output_folder, intrinsic_folder, verbose=True,
         verbose: whether to print detailed PnP quality info
         alignment_mode: how to align people to ground plane
             - "plane": fit plane to all foot points (original method, sensitive to outliers)
-            - "ransac": RANSAC-based plane fitting (more robust to outliers)
             - "per_person": shift each person so their lowest foot is at Y=0 (recommended for noisy data)
             - "extrinsics": use camera extrinsics to project feet onto known ground plane (BEST if you have extrinsics)
-        ransac_threshold: inlier threshold for RANSAC mode (meters)
         extrinsic_folder: folder containing camera extrinsic JSON files (required for "extrinsics" mode)
         
     Returns:
@@ -546,8 +527,6 @@ def solve_pnp_all(pkl_folder, output_folder, intrinsic_folder, verbose=True,
     all_quality_metrics = {}
     
     print(f"\nAlignment mode: {alignment_mode}")
-    if alignment_mode == "ransac":
-        print(f"RANSAC threshold: {ransac_threshold}m")
     if alignment_mode == "extrinsics":
         if extrinsic_folder is None:
             raise ValueError("extrinsic_folder is required for alignment_mode='extrinsics'")
@@ -647,42 +626,6 @@ def solve_pnp_all(pkl_folder, output_folder, intrinsic_folder, verbose=True,
                 data_copy["outputs"][idx]["pred_cam_t"] = np.zeros(3, dtype=np.float32)
                 data_copy["outputs"][idx]["focal_length"] = K[0, 0]
 
-        elif alignment_mode == "ransac":
-            # RANSAC: more robust to outliers
-            n, d, p0, inlier_mask = fit_plane_ransac(all_foot_points, threshold=ransac_threshold)
-            R_world = make_world_transform(n)
-            
-            num_inliers = inlier_mask.sum()
-            dists = np.abs(all_foot_points @ n + d)
-            print(f"\n[{img_id}] RANSAC plane fitting:")
-            print(f"  Inliers: {num_inliers}/{len(all_foot_points)} ({100*num_inliers/len(all_foot_points):.1f}%)")
-            print(f"  Plane normal: [{n[0]:.4f}, {n[1]:.4f}, {n[2]:.4f}]")
-            print(f"  RMS distance (inliers): {np.sqrt((dists[inlier_mask]**2).mean()):.4f}m")
-            print(f"  Max distance (inliers): {dists[inlier_mask].max():.4f}m")
-            
-            # Show which people are inliers/outliers
-            print(f"  Per-person inlier status:")
-            for person_idx in range(len(outputs)):
-                person_mask = foot_person_ids == person_idx
-                person_inliers = inlier_mask[person_mask].sum()
-                person_total = person_mask.sum()
-                status = "INLIER" if person_inliers == person_total else "OUTLIER" if person_inliers == 0 else "PARTIAL"
-                print(f"    Person {person_idx}: {person_inliers}/{person_total} inlier points ({status})")
-            
-            # Apply same transform to all
-            print(f"\n[{img_id}] After world transform:")
-            for idx, (J_cam, V_cam) in enumerate(zip(frame_J_cam, frame_V_cam)):
-                V_world = (R_world @ (V_cam - p0).T).T
-                J_world = (R_world @ (J_cam - p0).T).T
-                
-                foot_J_world = J_world[FOOT_INDICES]
-                print(f"  Person {idx} foot Y: min={foot_J_world[:,1].min():.4f}, max={foot_J_world[:,1].max():.4f}")
-                
-                data_copy["outputs"][idx]["pred_vertices"] = V_world.astype(np.float32)
-                data_copy["outputs"][idx]["pred_keypoints_3d_world"] = J_world.astype(np.float32)
-                data_copy["outputs"][idx]["pred_cam_t"] = np.zeros(3, dtype=np.float32)
-                data_copy["outputs"][idx]["focal_length"] = K[0, 0]
-
         elif alignment_mode == "per_person":
             # Per-person: shift each person so their lowest foot is at Y=0
             # First, still compute a common plane orientation (for consistent world up)
@@ -720,7 +663,7 @@ def solve_pnp_all(pkl_folder, output_folder, intrinsic_folder, verbose=True,
             # This is the BEST method if you have calibrated extrinsics!
             
             # Load extrinsics for this camera
-            extrinsic_file = os.path.join(extrinsic_folder, f"extrinsic_{cam_num}.json")
+            extrinsic_file = os.path.join(extrinsic_folder, f"extrinsic_{cam_num}_zh.json")
             if not os.path.exists(extrinsic_file):
                 print(f"  WARNING: Extrinsic file not found: {extrinsic_file}")
                 print(f"  Falling back to per_person mode for this frame")
@@ -821,71 +764,6 @@ def filter_foot_points(J_cam):
     return J_cam[FOOT_INDICES]
 
 
-def fit_plane_ransac(points, threshold=0.05, max_iterations=1000):
-    """
-    RANSAC-based plane fitting - more robust to outliers.
-    
-    Args:
-        points: (M, 3) array of 3D points
-        threshold: inlier distance threshold in meters
-        max_iterations: max RANSAC iterations
-        
-    Returns:
-        n: (3,) plane normal
-        d: plane offset
-        p0: (3,) point on the plane (centroid of inliers)
-        inlier_mask: (M,) boolean mask of inliers
-    """
-    best_n, best_d, best_inliers = None, None, None
-    best_num_inliers = 0
-    
-    M = len(points)
-    if M < 3:
-        # Fall back to regular fit
-        n, d, p0 = fit_plane(points)
-        return n, d, p0, np.ones(M, dtype=bool)
-    
-    for _ in range(max_iterations):
-        # Sample 3 random points
-        idx = np.random.choice(M, 3, replace=False)
-        p1, p2, p3 = points[idx]
-        
-        # Compute plane from 3 points
-        v1 = p2 - p1
-        v2 = p3 - p1
-        n = np.cross(v1, v2)
-        norm = np.linalg.norm(n)
-        if norm < 1e-10:
-            continue
-        n = n / norm
-        d = -np.dot(n, p1)
-        
-        # Count inliers
-        dists = np.abs(points @ n + d)
-        inlier_mask = dists < threshold
-        num_inliers = inlier_mask.sum()
-        
-        if num_inliers > best_num_inliers:
-            best_num_inliers = num_inliers
-            best_n = n
-            best_d = d
-            best_inliers = inlier_mask
-    
-    if best_n is None:
-        # Fallback
-        n, d, p0 = fit_plane(points)
-        return n, d, p0, np.ones(M, dtype=bool)
-    
-    # Refit using only inliers
-    inlier_points = points[best_inliers]
-    n, d, p0 = fit_plane(inlier_points)
-    
-    # Recompute inlier mask with final plane
-    dists = np.abs(points @ n + d)
-    final_inlier_mask = dists < threshold
-    
-    return n, d, p0, final_inlier_mask
-
 
 def fit_plane(points):
     """
@@ -952,7 +830,6 @@ def main():
 
     # Alignment mode options:
     # - "plane": fit plane to all foot points (original, sensitive to outliers)
-    # - "ransac": RANSAC plane fitting (robust to outliers, but still a common plane)
     # - "per_person": shift each person individually so their lowest foot is at Y=0 (best for noisy data)
     # - "extrinsics": use camera extrinsics to project feet onto known ground (BEST if you have extrinsics!)
     alignment_mode = "extrinsics"  # <-- Change this to try different modes
@@ -962,7 +839,6 @@ def main():
         pkl_folder, output_pkl_folder, intrinsic_folder, 
         verbose=True,
         alignment_mode=alignment_mode,
-        ransac_threshold=0.10,  # 10cm threshold for RANSAC mode
         extrinsic_folder=extrinsic_folder,  # required for "extrinsics" mode
     )
     
