@@ -5,7 +5,7 @@ import cv2
 import numpy as np
 
 from tools.vis_utils import visualize_sample_together  # uses Renderer internally
-from tools.vis_utils import visualize_world_floor, visualize_world_floor_interactive
+# from tools.vis_utils import visualize_world_floor
 
 def load_image(entry, images_dir=None):
     candidates = []
@@ -33,8 +33,8 @@ def main(args):
         img = load_image(entry, args.images_dir)
         outputs = entry["outputs"]
         faces = entry["faces"]
-        # rend_img = visualize_sample_together(img, outputs, faces)
-        rend_img = visualize_world_floor(outputs, faces, render_res=(800, 800))
+        rend_img = visualize_sample_together(img, outputs, faces)
+        # rend_img = visualize_world_floor(outputs, faces, render_res=(800, 800))
         # rend_img = visualize_world_floor_interactive(outputs, faces)
         out_name = os.path.splitext(fname)[0] + "_render.jpg"
         cv2.imwrite(os.path.join(args.output_folder, out_name), rend_img.astype(np.uint8))
