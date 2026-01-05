@@ -1,12 +1,19 @@
 import json
+from math import sqrt
 from pathlib import Path
 from typing import List, Dict, Any, Optional
 import numpy as np
 import pickle
+import os
+import cv2
+import matplotlib.pyplot as plt
 
-RAW_JSON_PATH = Path("./experiments/coco/")
+RAW_JSON_PATH = Path("/home/zonghuan/tudelft/projects/datasets/conflab/annotations/pose/coco")
 IMG_WIDTH = 960
 IMG_HEIGHT = 540
+REMOVE_BBOX = {
+    '428': [20, 26, 27]
+}
 
 # The 10 joints you mentioned, just for reference / debugging
 JOINT_NAMES = [
@@ -85,12 +92,12 @@ def build_save_bboxex_kps_all(output_path: Path):
             frame_coords = extract_raw_keypoints(skeleton)
             if frame_coords is None:
                 continue
-            bboxes, kps = build_bboxex_kps_single(frame_coords, IMG_WIDTH, IMG_HEIGHT)
+            bboxes, kps, pids = build_bboxex_kps_single(frame_coords, IMG_WIDTH, IMG_HEIGHT)
             bboxes_kps.append({
                 "bboxes": bboxes,
                 "kps": kps,
+                "pids": pids,
             })
-        
         # save to json
         if not output_path.exists():
             output_path.mkdir(parents=True)
@@ -101,7 +108,7 @@ def build_bboxex_kps_single(
     frame_coords,
     img_width,
     img_height,
-    pad_ratio=0.15,
+    pad_ratio=0.20,
     min_valid_kps=3,
 ):
     """
@@ -144,7 +151,7 @@ def build_bboxex_kps_single(
     person_ids = sorted(frame_coords.keys())
     all_bboxes = []
     all_keypoints = []
-
+    pids = []
     for pid in person_ids:
         coords = np.asarray(frame_coords[pid], dtype=float)  # (10, 2)
         if coords.shape != (10, 2):
@@ -188,13 +195,21 @@ def build_bboxex_kps_single(
         cx = 0.5 * (x_min + x_max)
         cy = 0.5 * (y_min + y_max)
 
-        pad_w = w * pad_ratio
-        pad_h = h * pad_ratio
+        pad_w = sqrt(w) * pad_ratio
+        pad_h = sqrt(h) * pad_ratio
 
-        x_min_p = max(0.0, cx - 0.5 * w - pad_w)
-        x_max_p = min(float(img_width - 1), cx + 0.5 * w + pad_w)
-        y_min_p = max(0.0, cy - 0.5 * h - pad_h)
-        y_max_p = min(float(img_height - 1), cy + 0.5 * h + pad_h)
+        x_min_p = max(0.0, cx - 0.5 * w - pad_w - 20)
+        x_max_p = min(float(img_width - 1), cx + 0.5 * w + pad_w + 20)
+        y_min_p = max(0.0, cy - 0.5 * h - pad_h - 20)
+        y_max_p = min(float(img_height - 1), cy + 0.5 * h + pad_h + 20)
+
+        absolute_pad = 15
+        if x_max_p - x_min_p < 80:
+            x_min_p = max(0.0, x_min_p - absolute_pad)
+            x_max_p = min(float(img_width - 1), x_max_p + absolute_pad)
+        if y_max_p - y_min_p < 80:
+            y_min_p = max(0.0, y_min_p - absolute_pad)
+            y_max_p = min(float(img_height - 1), y_max_p + absolute_pad)
 
         bbox = np.array([x_min_p, y_min_p, x_max_p, y_max_p], dtype=np.float32)
 
@@ -214,104 +229,20 @@ def build_bboxex_kps_single(
 
         all_bboxes.append(bbox)
         all_keypoints.append(kps_with_labels)
+        pids.append(pid)
 
     if not all_bboxes:
-        return None, None
+        return None, None, None
 
     bboxes = np.stack(all_bboxes, axis=0)           # (num_person, 4)
     keypoint_prompt = np.stack(all_keypoints, axis=0)  # (num_person, 10, 3)
+    pids = np.array(pids)
+    return bboxes, keypoint_prompt, pids
 
-    return bboxes, keypoint_prompt
-
-# def build_user_bboxes_and_keypoints(
-#     frame_coords,
-#     img_width,
-#     img_height,
-#     pad_ratio=0.15,
-#     min_valid_kps=3,
-# ):
-#     """
-#     frame_coords: {person_id: (10,2) ndarray} with normalized x,y in [0,1].
-#     Returns:
-#       user_bboxes: (num_user, 4) or None
-#       user_kps:    (num_user, 10, 3) or None   [x_px, y_px, mhr_label]
-#     """
-#     if frame_coords is None or len(frame_coords) == 0:
-#         return None, None
-
-#     person_ids = sorted(frame_coords.keys())
-#     all_bboxes = []
-#     all_kps = []
-
-#     for pid in person_ids:
-#         coords = np.asarray(frame_coords[pid], dtype=float)  # (10,2)
-#         if coords.shape != (10, 2):
-#             raise ValueError(
-#                 f"Expected (10,2) coords per person, got {coords.shape} for person {pid}"
-#             )
-
-#         # valid if both x,y finite
-#         valid_mask = np.isfinite(coords[:, 0]) & np.isfinite(coords[:, 1])
-#         num_valid = int(valid_mask.sum())
-#         if num_valid < min_valid_kps:
-#             # skip if too few
-#             continue
-
-#         # clip and convert to px
-#         coords_norm = np.clip(coords, 0.0, 1.0)
-#         xs = coords_norm[:, 0] * img_width
-#         ys = coords_norm[:, 1] * img_height
-#         xy_pix = np.stack([xs, ys], axis=-1).astype(np.float32)  # (10,2)
-
-#         xs_valid = xs[valid_mask]
-#         ys_valid = ys[valid_mask]
-
-#         x_min = xs_valid.min()
-#         x_max = xs_valid.max()
-#         y_min = ys_valid.min()
-#         y_max = ys_valid.max()
-
-#         w = x_max - x_min
-#         h = y_max - y_min
-#         if w <= 0:
-#             w = img_width * 0.02
-#         if h <= 0:
-#             h = img_height * 0.02
-
-#         cx = 0.5 * (x_min + x_max)
-#         cy = 0.5 * (y_min + y_max)
-
-#         pad_w = w * pad_ratio
-#         pad_h = h * pad_ratio
-
-#         x_min_p = max(0.0, cx - 0.5 * w - pad_w)
-#         x_max_p = min(float(img_width - 1), cx + 0.5 * w + pad_w)
-#         y_min_p = max(0.0, cy - 0.5 * h - pad_h)
-#         y_max_p = min(float(img_height - 1), cy + 0.5 * h + pad_h)
-
-#         bbox = np.array([x_min_p, y_min_p, x_max_p, y_max_p], dtype=np.float32)
-
-#         # [x, y, label]; default label -2 = invalid
-#         labels = np.full((10,), -2.0, dtype=np.float32)
-#         for j in range(10):
-#             if valid_mask[j]:
-#                 labels[j] = float(MHR70_MAP[j])
-
-#         kps_with_labels = np.concatenate([xy_pix, labels[:, None]], axis=-1)  # (10,3)
-
-#         all_bboxes.append(bbox)
-#         all_kps.append(kps_with_labels)
-
-#     if not all_bboxes:
-#         return None, None
-
-#     user_bboxes = np.stack(all_bboxes, axis=0)   # (num_user, 4)
-#     user_kps = np.stack(all_kps, axis=0)         # (num_user, 10, 3)
-
-#     return user_bboxes, user_kps
 
 def refine_bboxes_kps_single(
     data,
+    seg_name,
     img_width=IMG_WIDTH,
     img_height=IMG_HEIGHT,
     min_valid_kps=6,          # 1) minimum number of valid kps
@@ -326,7 +257,7 @@ def refine_bboxes_kps_single(
     data: list of dicts, each with:
         'bboxes': (N, 4) or None
         'kps':    (N, 10, 3) or None
-
+        'pids':   (N,) or None
     Modifies data in-place:
         - removes persons that fail any condition
         - sets bboxes/kps to empty arrays if no one remains
@@ -337,7 +268,7 @@ def refine_bboxes_kps_single(
     for idx, item in enumerate(data):
         bboxes = item.get('bboxes', None)
         kps = item.get('kps', None)
-
+        pids = item.get('pids', None)
         if bboxes is None or kps is None:
             continue
 
@@ -357,7 +288,7 @@ def refine_bboxes_kps_single(
         for i in range(N):
             bbox = bboxes[i]       # [x1, y1, x2, y2]
             kp_person = kps[i]     # (10, 3) [x, y, label]
-
+            pid = pids[i]
             # Skip if bbox has NaNs
             if not np.all(np.isfinite(bbox)):
                 keep_mask[i] = False
@@ -437,19 +368,26 @@ def refine_bboxes_kps_single(
                 ):
                     keep_mask[i] = False
                     continue
+            # ------------------------------------------------------------------
+            # 5) manually remove based on REMOVE_BBOX
+            # ------------------------------------------------------------------
+            if seg_name in REMOVE_BBOX.keys():
+                if int(pid) in REMOVE_BBOX[seg_name]:
+                    keep_mask[i] = False
+                    continue
 
         # Apply mask
         bboxes_refined = bboxes[keep_mask]
         kps_refined = kps[keep_mask]
-
+        pids_refined = pids[keep_mask]
         # You can choose between [] or None if nothing remains; I'll use empty arrays
         if bboxes_refined.size == 0:
             bboxes_refined = np.empty((0, 4), dtype=float)
             kps_refined = np.empty((0, 10, 3), dtype=float)
-
+            pids_refined = np.empty((0,), dtype=int)
         data[idx]['bboxes'] = bboxes_refined
         data[idx]['kps'] = kps_refined
-
+        data[idx]['pids'] = pids_refined
     return data
 
 def refine_bboxes_kps(bbox_kp_folder: Path, output_folder: Path):
@@ -461,12 +399,35 @@ def refine_bboxes_kps(bbox_kp_folder: Path, output_folder: Path):
     for pkl_file in bbox_kp_folder.glob("*.pkl"):
         with open(pkl_file, "rb") as f:
             data = pickle.load(f)
-        data = refine_bboxes_kps_single(data)
+        seg_name = pkl_file.stem
+        data = refine_bboxes_kps_single(data, seg_name)
         with open(output_folder / pkl_file.name, "wb") as f:
             pickle.dump(data, f)
 
 
+def plot_bboxes_kps(frame_num, seg_num, bbox_path, image_path, output_folder):
+    bbox_filename = f"{seg_num}.pkl"
+    img_filename = f"{seg_num}_{frame_num:06d}.jpg"
+    img = cv2.imread(os.path.join(image_path, img_filename))
+    bbox_path = os.path.join(bbox_path, bbox_filename)
+    with open(bbox_path, "rb") as f:
+        data = pickle.load(f)
+    bboxes = data[frame_num]["bboxes"]
+    kps = data[frame_num]["kps"]
+    pids = data[frame_num]["pids"]
+    for bbox, kp, pid in zip(bboxes, kps, pids):
+        color = (np.random.randint(0, 255), np.random.randint(0, 255), np.random.randint(0, 255))
+        cv2.rectangle(img, (int(bbox[0]), int(bbox[1])), (int(bbox[2]), int(bbox[3])), color, 2)
+        for kp in kp:
+            cv2.circle(img, (int(kp[0]), int(kp[1])), 3, color, -1)
+        cv2.putText(img, str(pid), (int(bbox[0]), int(bbox[1])+30), cv2.FONT_HERSHEY_SIMPLEX, 0.5, color, 2)
+        plt.imshow(img)
+        plt.show()
+    cv2.imwrite(os.path.join(output_folder, img_filename.replace(".jpg", f"_bbox_kps_{frame_num}.jpg")), img)
+    return img
+
 if __name__ == "__main__":
-    # build_save_bboxex_kps_all(Path("./experiments/bboxex_kps/"))
-    # on linux
+    # build_save_bboxex_kps_all(Path("./experiments/inputs/bboxes_kps/"))
     refine_bboxes_kps(Path("./experiments/inputs/bboxes_kps/"), Path("./experiments/inputs/bboxes_kps_refined/"))
+    plot_bboxes_kps(0, 428, Path("./experiments/inputs/bboxes_kps_refined/"), \
+        Path("./experiments/inputs/images/"), Path("./experiments/inputs/images_with_pids/"))
